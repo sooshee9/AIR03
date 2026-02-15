@@ -625,32 +625,37 @@ const IndentModule: React.FC<IndentModuleProps> = ({ user }) => {
 
       <div style={{ marginBottom: 16, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <label>Item Name:</label>
-        {_itemNames.length > 0 ? (
-          <select 
-            name="itemName" 
-            value={itemInput.model} 
-            onChange={handleChange}
-            style={{ padding: 8, borderRadius: 4, border: '1px solid #ccc' }}
-          >
-            <option value="">Select Item Name</option>
-            {_itemNames.map(name => (
-              <option key={name} value={name}>{name}</option>
-            ))}
-          </select>
-        ) : (
-          <input 
-            type="text" 
-            name="itemName" 
-            value={itemInput.model} 
-            onChange={handleChange}
-            style={{ padding: 8, borderRadius: 4, border: '1px solid #ccc' }}
-          />
-        )}
+        <select 
+          name="itemName" 
+          value={itemInput.model} 
+          onChange={handleChange}
+          style={{ 
+            padding: 8, 
+            borderRadius: 4, 
+            border: itemMaster.length === 0 ? '2px solid red' : '1px solid #ccc',
+            minWidth: 200
+          }}
+        >
+          <option value="">
+            {itemMaster.length === 0 ? "No items in Item Master" : "Select Item Name"}
+          </option>
+          {itemMaster.map(item => (
+            <option key={item.itemCode} value={item.itemName}>
+              {item.itemName} - {item.itemCode}
+            </option>
+          ))}
+        </select>
         <input
           placeholder="Item Code"
           value={itemInput.itemCode}
-          onChange={e => setItemInput({ ...itemInput, itemCode: e.target.value })}
-          style={{ padding: 8, borderRadius: 4, border: '1px solid #ccc' }}
+          readOnly
+          style={{ 
+            padding: 8, 
+            borderRadius: 4, 
+            border: '1px solid #ccc',
+            background: '#f5f5f5',
+            cursor: 'not-allowed'
+          }}
         />
         <input
           type="number"
