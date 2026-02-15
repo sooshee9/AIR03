@@ -66,7 +66,11 @@ const IndentModule: React.FC<IndentModuleProps> = ({ user }) => {
       setIndents(formattedIndents);
     });
 
-    const unsubStock = subscribeFirestoreDocs(uid, 'stock-records', (docs) => {
+    const unsubStock = subscribeFirestoreDocs(uid, 'stockRecords', (docs) => {
+      console.log('[IndentModule] 📦 Stock records received:', docs?.length || 0, 'records');
+      if (docs?.length > 0) {
+        console.log('[IndentModule] Sample stock record:', docs[0]);
+      }
       setStockRecords(docs);
     });
 
@@ -396,9 +400,13 @@ const IndentModule: React.FC<IndentModuleProps> = ({ user }) => {
     // VALIDATION: Check stock availability against Stock Module closing stock
     let insufficientStockItems: Array<{ model: string; itemCode: string; requested: number; available: number }> = [];
     
+    console.log('[IndentModule] Stock validation started. Total stock records available:', stockRecords?.length || 0);
+    
     newIndent.items.forEach(item => {
       const totalStock = getStock(item.itemCode);
       const requestedQty = Number(item.qty) || 0;
+      
+      console.log(`[IndentModule] Validating ${item.model} (${item.itemCode}): Requested=${requestedQty}, Available=${totalStock}, Match=${requestedQty > totalStock ? 'INSUFFICIENT' : 'OK'}`);
       
       if (requestedQty > totalStock) {
         insufficientStockItems.push({
@@ -410,18 +418,15 @@ const IndentModule: React.FC<IndentModuleProps> = ({ user }) => {
       }
     });
 
+    console.log('[IndentModule] Validation complete. Insufficient items:', insufficientStockItems);
+
     if (insufficientStockItems.length > 0) {
       const itemsList = insufficientStockItems
         .map(i => `${i.model} (${i.itemCode}): Requested ${i.requested} but only ${i.available} available`)
         .join('\n');
       
-      const shouldProceed = window.confirm(
-        `⚠️ INSUFFICIENT STOCK:\n\n${itemsList}\n\nDo you want to proceed anyway?\n(Press OK to continue, Cancel to edit)`
-      );
-      
-      if (!shouldProceed) {
-        return;
-      }
+      alert(`⚠️ INSUFFICIENT STOCK DETECTED:\n\n${itemsList}\n\nPlease update quantities in Stock Module first.`);
+      return;
     }
 
     const indentNo = getNextIndentNo();
@@ -838,14 +843,15 @@ const IndentModule: React.FC<IndentModuleProps> = ({ user }) => {
         }));
         const insufficientCount = stockValidation.filter(s => s.hasInsufficientStock).length;
         const allValid = insufficientCount === 0;
+        const stockRecordsLoaded = (stockRecords?.length || 0) > 0;
 
         return (
           <div style={{
             padding: 12,
             marginBottom: 16,
             borderRadius: 6,
-            background: allValid ? '#f1f8e9' : '#fff3e0',
-            border: `2px solid ${allValid ? '#43a047' : '#ff9800'}`
+            background: allValid && stockRecordsLoaded ? '#f1f8e9' : '#fff3e0',
+            border: `2px solid ${allValid && stockRecordsLoaded ? '#43a047' : '#ff9800'}`
           }}>
             <div style={{ fontWeight: 600, marginBottom: 8 }}>
               📋 Indent Summary:
@@ -853,12 +859,20 @@ const IndentModule: React.FC<IndentModuleProps> = ({ user }) => {
             <div>
               • Total Items: {newIndent.items.length}
             </div>
+            <div>
+              • Stock Records Loaded: {stockRecordsLoaded ? `✓ ${stockRecords?.length || 0} items` : '❌ Loading...'}
+            </div>
             <div style={{ color: '#43a047', fontWeight: 600 }}>
               • ✓ Items with sufficient stock: {newIndent.items.length - insufficientCount}
             </div>
             {insufficientCount > 0 && (
               <div style={{ color: '#ff9800', fontWeight: 600 }}>
                 • ⚠️ Items with INSUFFICIENT stock: {insufficientCount}
+              </div>
+            )}
+            {!stockRecordsLoaded && (
+              <div style={{ color: '#ff9800', fontWeight: 600, marginTop: 8 }}>
+                ⚠️ Stock records not loaded yet. Please wait or refresh from Stock Module.
               </div>
             )}
           </div>
