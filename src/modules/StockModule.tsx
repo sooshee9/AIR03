@@ -29,8 +29,6 @@ const LOCAL_STORAGE_KEY = "stock-records";
 
 const STOCK_MODULE_FIELDS = [
   { key: "itemName", label: "Item Name", type: "text" },
-  { key: "itemCode", label: "Item Code", type: "text" },
-  { key: "batchNo", label: "Batch No", type: "text" },
   { key: "stockQty", label: "Stock Qty", type: "number" },
   { key: "indentQty", label: "Indent Qty", type: "number", readOnly: true },
   { key: "purchaseQty", label: "Purchase Qty", type: "number", readOnly: true },
@@ -648,7 +646,7 @@ const StockModule: React.FC = () => {
                 style={{ width: "100%", padding: 6, borderRadius: 4, border: itemMasterState.length === 0 ? "2px solid red" : "1px solid #bbb" }}
               >
                 <option value="">
-                  {itemMasterState.length === 0 ? "No items in Item Master" : "Select Item Name and Code"}
+                  {itemMasterState.length === 0 ? "No items in Item Master" : "Select Item Name"}
                 </option>
                 {itemMasterState.map((item) => (
                   <option key={item.id || item.itemCode} value={item.itemCode}>
