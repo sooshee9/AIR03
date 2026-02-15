@@ -28,63 +28,64 @@ const ItemMasterModule: React.FC = () => {
   // Migrate existing localStorage item master entries into Firestore on sign-in
   // Subscribe to Firestore for realtime data
   useEffect(() => {
-    let unsubscribe: (() => void) | null = null;
-    
     const unsub = onAuthStateChanged(auth, (u) => {
       const uid = u ? u.uid : null;
       setUserUid(uid);
 
-      if (uid) {
-        // Migrate localStorage if exists
-        (async () => {
-          try {
-            const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-            if (raw) {
-              const arr = JSON.parse(raw || '[]');
-              if (Array.isArray(arr) && arr.length > 0) {
-                for (const it of arr) {
-                  try {
-                    const payload = { ...it } as any;
-                    if (typeof payload.id !== 'undefined') delete payload.id;
-                    const col = collection(db, 'userData', uid, 'itemMasterData');
-                    await addDoc(col, { ...payload, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
-                  } catch (err) {
-                    console.warn('[ItemMasterModule] migration addDoc failed for item', it, err);
-                  }
-                }
-                try { localStorage.removeItem(LOCAL_STORAGE_KEY); } catch {}
-              }
-            }
-          } catch (err) {
-            console.error('[ItemMasterModule] Migration failed:', err);
-          }
-
-          // After migration, subscribe to Firestore
-          try {
-            const col = collection(db, 'userData', uid, 'itemMasterData');
-            unsubscribe = onSnapshot(col, (snap) => {
-              const mapped = snap.docs.map(d => ({
-                id: d.id,
-                itemName: d.data().itemName || '',
-                itemCode: d.data().itemCode || '',
-              } as ItemMasterRecord));
-              setRecords(mapped);
-            });
-          } catch (err) {
-            console.error('[ItemMasterModule] Firestore subscription error:', err);
-          }
-        })();
-      } else {
+      if (!uid) {
         // User signed out
         setRecords([]);
-        if (unsubscribe) unsubscribe();
+        return;
       }
+
+      // User signed in — set up subscription immediately
+      let unsubscribe: (() => void) | null = null;
+      try {
+        const col = collection(db, 'userData', uid, 'itemMasterData');
+        unsubscribe = onSnapshot(col, (snap) => {
+          const mapped = snap.docs.map(d => ({
+            id: d.id,
+            itemName: d.data().itemName || '',
+            itemCode: d.data().itemCode || '',
+          } as ItemMasterRecord));
+          setRecords(mapped);
+        });
+      } catch (err) {
+        console.error('[ItemMasterModule] Firestore subscription error:', err);
+      }
+
+      // Migrate localStorage in the background (doesn't block subscription)
+      (async () => {
+        try {
+          const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+          if (raw) {
+            const arr = JSON.parse(raw || '[]');
+            if (Array.isArray(arr) && arr.length > 0) {
+              for (const it of arr) {
+                try {
+                  const payload = { ...it } as any;
+                  if (typeof payload.id !== 'undefined') delete payload.id;
+                  const col = collection(db, 'userData', uid, 'itemMasterData');
+                  await addDoc(col, { ...payload, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+                } catch (err) {
+                  console.warn('[ItemMasterModule] migration addDoc failed for item', it, err);
+                }
+              }
+              try { localStorage.removeItem(LOCAL_STORAGE_KEY); } catch {}
+            }
+          }
+        } catch (err) {
+          console.error('[ItemMasterModule] Migration failed:', err);
+        }
+      })();
+
+      // Return cleanup function for this subscription
+      return () => {
+        try { if (unsubscribe) unsubscribe(); } catch {}
+      };
     });
 
-    return () => {
-      try { unsub(); } catch {}
-      try { if (unsubscribe) unsubscribe(); } catch {}
-    };
+    return () => { try { unsub(); } catch {} };
   }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
