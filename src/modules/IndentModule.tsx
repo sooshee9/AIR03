@@ -294,7 +294,7 @@ const IndentModule: React.FC<IndentModuleProps> = ({ user }) => {
     const previousAllocatedQty = getCumulativeAllocatedQtyUpTo(itemCode, indentIndex);
     const poQuantity = getPOQuantity(itemCode);
     const availableBefore = totalStock - previousAllocatedQty;
-    const availableForThisIndent = availableBefore - (Number(itemQty) || 0);
+    const availableForThisIndent = (totalStock + poQuantity) - previousAllocatedQty - (Number(itemQty) || 0);
     const allocatedAvailable = Math.min(Math.max(0, availableBefore), Number(itemQty) || 0);
     const isClosed = availableBefore >= (Number(itemQty) || 0);
     
