@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import bus from '../utils/eventBus';
 import * as XLSX from 'xlsx';
 import { subscribeFirestoreDocs, replaceFirestoreCollection, getFirestoreDocs } from '../utils/firestoreSync';
-import { getItemMaster } from '../utils/firestoreServices';
+import { getItemMaster, subscribeStockRecords, subscribePurchaseOrders } from '../utils/firestoreServices';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../firebase';
 
@@ -37,6 +37,10 @@ const IndentModule: React.FC<IndentModuleProps> = ({ user }) => {
 
   // Subscribe to Firestore collections and load itemMaster on mount
   useEffect(() => {
+    let unsubIndents: any = () => {};
+    let unsubStock: any = () => {};
+    let unsubPO: any = () => {};
+
     const unsub = onAuthStateChanged(auth, (u) => {
       if (u) {
         // Load itemMaster using one-time fetch (same pattern as StockModule/VSIR)
@@ -50,41 +54,46 @@ const IndentModule: React.FC<IndentModuleProps> = ({ user }) => {
             setItemMaster([]);
           }
         })();
+
+        // Subscribe to collections
+        unsubIndents = subscribeFirestoreDocs(u.uid, 'indentData', (docs) => {
+          const formattedIndents = docs.map(doc => ({
+            indentNo: doc.indentNo,
+            date: doc.date,
+            indentBy: doc.indentBy,
+            oaNo: doc.oaNo,
+            items: Array.isArray(doc.items) ? doc.items : [],
+          }));
+          setIndents(formattedIndents);
+        });
+
+        unsubStock = subscribeStockRecords(u.uid, (docs) => {
+          console.log('[IndentModule] 📦 Stock records received:', docs?.length || 0, 'records');
+          if (docs?.length > 0) {
+            console.log('[IndentModule] Sample stock record:', docs[0]);
+          }
+          setStockRecords(docs || []);
+        });
+
+        unsubPO = subscribePurchaseOrders(u.uid, (docs) => {
+          console.log('[IndentModule] 🛒 Purchase orders received:', docs?.length || 0, 'records');
+          setPurchaseOrders(docs || []);
+        });
       } else {
         setItemMaster([]);
+        setIndents([]);
+        setStockRecords([]);
+        setPurchaseOrders([]);
       }
-    });
-
-    const unsubIndents = subscribeFirestoreDocs(uid, 'indentData', (docs) => {
-      const formattedIndents = docs.map(doc => ({
-        indentNo: doc.indentNo,
-        date: doc.date,
-        indentBy: doc.indentBy,
-        oaNo: doc.oaNo,
-        items: Array.isArray(doc.items) ? doc.items : [],
-      }));
-      setIndents(formattedIndents);
-    });
-
-    const unsubStock = subscribeFirestoreDocs(uid, 'stockRecords', (docs) => {
-      console.log('[IndentModule] 📦 Stock records received:', docs?.length || 0, 'records');
-      if (docs?.length > 0) {
-        console.log('[IndentModule] Sample stock record:', docs[0]);
-      }
-      setStockRecords(docs);
-    });
-
-    const unsubPO = subscribeFirestoreDocs(uid, 'purchaseOrders', (docs) => {
-      setPurchaseOrders(docs);
     });
 
     return () => {
       try { unsub(); } catch {}
-      unsubIndents();
-      unsubStock();
-      unsubPO();
+      try { unsubIndents(); } catch {}
+      try { unsubStock(); } catch {}
+      try { unsubPO(); } catch {}
     };
-  }, [uid]);
+  }, []);
 
   function getNextIndentNo() {
     const base = 'S-8/25-';
