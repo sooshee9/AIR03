@@ -724,50 +724,56 @@ const PSIRModule: React.FC = () => {
     }));
   };
 
-  const handleDeleteItem = (psirIdx: number, itemIdx: number) => {
-    setPsirs(prevPsirs => {
-      const target = prevPsirs[psirIdx];
-      if (!target) {
-        console.error('[PSIRModule] Target PSIR not found at index', psirIdx);
-        return prevPsirs;
-      }
+  const handleDeleteItem = async (psirIdx: number, itemIdx: number) => {
+    const target = psirs[psirIdx];
+    if (!target) {
+      console.error('[PSIRModule] Target PSIR not found at index', psirIdx);
+      alert('Error: Could not find PSIR record');
+      return;
+    }
 
-      // Create updated PSIR with item removed
-      const updatedTarget = { 
-        ...target, 
-        items: target.items.filter((_, idx) => idx !== itemIdx) 
-      };
+    // Create updated PSIR with item removed
+    const updatedTarget = { 
+      ...target, 
+      items: target.items.filter((_, idx) => idx !== itemIdx) 
+    };
 
-      // Update local state
-      const updated = prevPsirs.map((p, pIdx) => {
-        if (pIdx !== psirIdx) return p;
-        return updatedTarget;
-      });
-
-      // Update or delete in Firestore
+    try {
+      // First, persist to Firestore BEFORE updating local state
       if (userUid && (target as any).id) {
-        (async () => {
-          try {
-            if (updatedTarget.items.length === 0) {
-              // Delete entire PSIR if no items remain
-              console.log('[PSIRModule] Deleting PSIR:', (target as any).id);
-              await deletePsir((target as any).id);
-            } else {
-              // Update PSIR with remaining items
-              console.log('[PSIRModule] Updating PSIR with remaining items:', (target as any).id);
-              await updatePsir((target as any).id, updatedTarget);
-            }
-          } catch (e) {
-            console.error('[PSIRModule] Failed to update/delete PSIR in Firestore after item delete', e);
-          }
-        })();
+        if (updatedTarget.items.length === 0) {
+          // Delete entire PSIR if no items remain
+          console.log('[PSIRModule] Deleting PSIR:', (target as any).id);
+          await deletePsir((target as any).id);
+          console.log('[PSIRModule] Delete successful for PSIR:', (target as any).id);
+        } else {
+          // Update PSIR with remaining items
+          console.log('[PSIRModule] Updating PSIR with remaining items:', (target as any).id);
+          await updatePsir((target as any).id, updatedTarget);
+          console.log('[PSIRModule] Update successful for PSIR:', (target as any).id);
+        }
+      } else {
+        console.warn('[PSIRModule] Missing userUid or PSIR ID, cannot persist deletion');
+        alert('Error: User not authenticated or PSIR ID missing');
+        return;
       }
-      
-      // Filter out empty PSIRs from local state
-      const filtered = updated.filter(p => p.items.length > 0);
-      try { bus.dispatchEvent(new CustomEvent('psir.updated', { detail: { psirs: filtered } })); } catch (err) {}
-      return filtered;
-    });
+
+      // ONLY update local state AFTER Firestore operation succeeds
+      setPsirs(prev => {
+        const updated = prev.map((p, idx) => {
+          if (idx !== psirIdx) return p;
+          return updatedTarget;
+        });
+
+        // Filter out empty PSIRs from local state
+        const filtered = updated.filter(p => p.items.length > 0);
+        try { bus.dispatchEvent(new CustomEvent('psir.updated', { detail: { psirs: filtered } })); } catch (err) {}
+        return filtered;
+      });
+    } catch (e) {
+      console.error('[PSIRModule] Failed to delete/update PSIR in Firestore:', e);
+      alert('Error deleting item: ' + String(e));
+    }
   };
 
   // Debug helpers
@@ -1652,7 +1658,7 @@ const PSIRModule: React.FC = () => {
                   <td>{item.remarks}</td>
                   <td>
                     <button onClick={() => handleEditPSIR(psirIdx)}>Edit</button>
-                    <button onClick={() => handleDeleteItem(psirIdx, itemIdx)}>Delete</button>
+                    <button onClick={() => handleDeleteItem(psirIdx, itemIdx).catch(err => console.error('Delete failed:', err))}>Delete</button>
                     <button
                       onClick={() => {
                         try {
