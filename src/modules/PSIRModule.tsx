@@ -647,6 +647,7 @@ const PSIRModule: React.FC = () => {
 
   const handleDeleteItem = (psirIdx: number, itemIdx: number) => {
     setPsirs(prevPsirs => {
+      const target = prevPsirs[psirIdx];
       const updated = prevPsirs
         .map((p, pIdx) => {
           if (pIdx !== psirIdx) return p;
@@ -655,11 +656,14 @@ const PSIRModule: React.FC = () => {
         .filter(p => p.items.length > 0);
       
       // Update in Firestore
-      const target = prevPsirs[psirIdx];
       if (userUid && (target as any).id) {
         (async () => {
           try {
-            await updatePsir((target as any).id, updated[psirIdx]);
+            // Find the updated PSIR by ID since index may have changed after filtering
+            const updatedRecord = updated.find(p => (p as any).id === (target as any).id);
+            if (updatedRecord) {
+              await updatePsir((target as any).id, updatedRecord);
+            }
           } catch (e) {
             console.error('[PSIRModule] Failed to update PSIR in Firestore after item delete', e);
           }
