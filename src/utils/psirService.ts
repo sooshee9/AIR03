@@ -27,11 +27,24 @@ export const subscribePsirs = (uid: string, cb: (docs: Array<PSIRDoc & { id: str
       // Fallback: simple query without orderBy, sort client-side
       const qFallback = query(col, where('userId', '==', uid));
       unsub = onSnapshot(qFallback, snap => {
-        const docs = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+        let docs = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
         // Sort client-side by createdAt descending
         docs.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
-        console.log('[PSIRService.subscribePsirs] 🔔 SNAPSHOT (fallback) -', docs.length, 'PSIRs received');
+        
+        // Deduplicate by indentNo and poNo (keep most recent)
+        const seen = new Map<string, any>();
+        docs.forEach(doc => {
+          const key = `${doc.indentNo || ''}-${doc.poNo || ''}`;
+          if (!seen.has(key) || (doc.createdAt?.toMillis?.() || 0) > (seen.get(key).createdAt?.toMillis?.() || 0)) {
+            seen.set(key, doc);
+          }
+        });
+        docs = Array.from(seen.values());
+        docs.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+        
+        console.log('[PSIRService.subscribePsirs] 🔔 SNAPSHOT (fallback) -', docs.length, 'PSIRs received (after dedup)');
         console.log('[PSIRService.subscribePsirs] IDs:', docs.map(d => d.id));
+        console.log('[PSIRService.subscribePsirs] Dedup removed', snap.docs.length - docs.length, 'duplicates');
         cb(docs);
       }, (error2) => {
         console.error('[PSIRService] Even fallback query failed:', error2.code, error2.message);
@@ -49,10 +62,23 @@ export const subscribePsirs = (uid: string, cb: (docs: Array<PSIRDoc & { id: str
   };
   
   unsub = onSnapshot(qWithIndex, snap => {
-    const docs = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+    let docs = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
     docs.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
-    console.log('[PSIRService.subscribePsirs] 🔔 SNAPSHOT (index) -', docs.length, 'PSIRs received');
+    
+    // Deduplicate by indentNo and poNo (keep most recent)
+    const seen = new Map<string, any>();
+    docs.forEach(doc => {
+      const key = `${doc.indentNo || ''}-${doc.poNo || ''}`;
+      if (!seen.has(key) || (doc.createdAt?.toMillis?.() || 0) > (seen.get(key).createdAt?.toMillis?.() || 0)) {
+        seen.set(key, doc);
+      }
+    });
+    docs = Array.from(seen.values());
+    docs.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+    
+    console.log('[PSIRService.subscribePsirs] 🔔 SNAPSHOT (index) -', docs.length, 'PSIRs received (after dedup)');
     console.log('[PSIRService.subscribePsirs] IDs:', docs.map(d => d.id));
+    console.log('[PSIRService.subscribePsirs] Dedup removed', snap.docs.length - docs.length, 'duplicates');
     cb(docs);
   }, handleIndexError);
   
@@ -75,6 +101,7 @@ export const updatePsir = async (id: string, data: any) => {
 
 export const deletePsir = async (id: string) => {
   console.log('[psirService.deletePsir] Starting - id:', id);
+  console.log('[psirService.deletePsir] ⚠️ DELETING FROM FIRESTORE - This should be removed on next subscription callback');
   await deleteDoc(doc(db, 'psirs', id));
-  console.log('[psirService.deletePsir] Success - deleted ID:', id);
-};
+  console.log('[psirService.deletePsir] ✅ SUCCESS - document deleted from Firestore:', id);
+  console.log('[psirService.deletePsir] 📌 Watch for subscription callback - document should no longer appear');
