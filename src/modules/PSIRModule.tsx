@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import bus from '../utils/eventBus';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../firebase';
-import { addPsir, updatePsir, subscribePsirs } from '../utils/psirService';
+import { addPsir, updatePsir, subscribePsirs, deletePsir } from '../utils/psirService';
 import { getItemMaster, getPurchaseData, getIndentData, getStockRecords, getPurchaseOrders, updatePurchaseData, updatePurchaseOrder } from '../utils/firestoreServices';
 
 interface PSIRItem {
@@ -666,6 +666,37 @@ const PSIRModule: React.FC = () => {
             }
           } catch (e) {
             console.error('[PSIRModule] Failed to update PSIR in Firestore after item delete', e);
+          }
+        })();
+      }
+      
+      try { bus.dispatchEvent(new CustomEvent('psir.updated', { detail: { psirs: updated } })); } catch (err) {}
+      return updated;
+    });
+  };
+
+  const handleDeletePSIR = (psirIdx: number) => {
+    const psirToDelete = psirs[psirIdx];
+    if (!psirToDelete || !(psirToDelete as any).id) {
+      console.error('[PSIRModule] Cannot delete PSIR: missing ID');
+      return;
+    }
+
+    if (!window.confirm(`Delete PSIR for PO ${psirToDelete.poNo || psirToDelete.indentNo}? This cannot be undone.`)) {
+      return;
+    }
+
+    setPsirs(prevPsirs => {
+      const updated = prevPsirs.filter((_, idx) => idx !== psirIdx);
+      
+      // Delete from Firestore
+      if (userUid) {
+        (async () => {
+          try {
+            await deletePsir((psirToDelete as any).id);
+            console.log('[PSIRModule] Successfully deleted PSIR from Firestore:', (psirToDelete as any).id);
+          } catch (e) {
+            console.error('[PSIRModule] Failed to delete PSIR from Firestore', e);
           }
         })();
       }
@@ -1492,49 +1523,70 @@ const PSIRModule: React.FC = () => {
               </td>
             </tr>
           ) : (
-            psirs.flatMap((psir, psirIdx) => 
-              (psir?.items || []).map((item, itemIdx) => {
-                const poQty = getPOQtyFor(psir.poNo, psir.indentNo, item.itemCode) || 0;
-                return (
-                <tr key={`${psirIdx}-${itemIdx}`}>
-                  <td>{psir.receivedDate}</td>
-                  <td>{psir.indentNo}</td>
-                  <td>{psir.oaNo}</td>
-                  <td>{psir.poNo}</td>
-                  <td>{psir.batchNo}</td>
-                  <td>{psir.invoiceNo}</td>
-                  <td>{psir.supplierName}</td>
-                  <td>{item.itemName}</td>
-                  <td>{item.itemCode}</td>
-                  <td>{Math.abs(poQty)}</td>
-                  <td>{item.qtyReceived}</td>
-                  <td>{item.okQty}</td>
-                  <td>{item.rejectQty}</td>
-                  <td>{item.grnNo}</td>
-                  <td>{item.remarks}</td>
-                  <td>
-                    <button onClick={() => handleEditPSIR(psirIdx)}>Edit</button>
-                    <button onClick={() => handleDeleteItem(psirIdx, itemIdx)}>Delete</button>
-                    <button
-                      onClick={() => {
-                        try {
-                          const d = getPOQtyMatchDetails(psir.poNo, psir.indentNo, item.itemCode);
-                          setPsirDebugExtra(formatJSON({ title: 'PO Qty debug for row', d }));
-                          setPsirDebugOpen(true);
-                        } catch (err) {
-                          setPsirDebugExtra('Error computing debug: ' + String(err));
-                          setPsirDebugOpen(true);
-                        }
-                      }}
-                      style={{ marginLeft: 8 }}
-                    >
-                      PO Debug
-                    </button>
-                  </td>
-                </tr>
-                );
-              })
-            )
+            psirs.flatMap((psir, psirIdx) => {
+              const isFirstItemRow = true;
+              return (
+                (psir?.items || []).length > 0 ? (
+                  (psir?.items || []).map((item, itemIdx) => {
+                    const poQty = getPOQtyFor(psir.poNo, psir.indentNo, item.itemCode) || 0;
+                    // Show delete PSIR button only on first item row for each PSIR
+                    const showDeletePsirBtn = itemIdx === 0;
+                    return (
+                    <tr key={`${psirIdx}-${itemIdx}`}>
+                      <td>{psir.receivedDate}</td>
+                      <td>{psir.indentNo}</td>
+                      <td>{psir.oaNo}</td>
+                      <td>{psir.poNo}</td>
+                      <td>{psir.batchNo}</td>
+                      <td>{psir.invoiceNo}</td>
+                      <td>{psir.supplierName}</td>
+                      <td>{item.itemName}</td>
+                      <td>{item.itemCode}</td>
+                      <td>{Math.abs(poQty)}</td>
+                      <td>{item.qtyReceived}</td>
+                      <td>{item.okQty}</td>
+                      <td>{item.rejectQty}</td>
+                      <td>{item.grnNo}</td>
+                      <td>{item.remarks}</td>
+                      <td>
+                        {showDeletePsirBtn && (
+                          <button onClick={() => handleDeletePSIR(psirIdx)} style={{ color: 'red', fontWeight: 'bold' }}>
+                            Delete PSIR
+                          </button>
+                        )}
+                        <button onClick={() => handleEditPSIR(psirIdx)}>Edit</button>
+                        <button onClick={() => handleDeleteItem(psirIdx, itemIdx)}>Delete Item</button>
+                        <button
+                          onClick={() => {
+                            try {
+                              const d = getPOQtyMatchDetails(psir.poNo, psir.indentNo, item.itemCode);
+                              setPsirDebugExtra(formatJSON({ title: 'PO Qty debug for row', d }));
+                              setPsirDebugOpen(true);
+                            } catch (err) {
+                              setPsirDebugExtra('Error computing debug: ' + String(err));
+                              setPsirDebugOpen(true);
+                            }
+                          }}
+                          style={{ marginLeft: 8 }}
+                        >
+                          PO Debug
+                        </button>
+                      </td>
+                    </tr>
+                    );
+                  })
+                ) : (
+                  <tr key={`${psirIdx}-empty`}>
+                    <td colSpan={15} style={{ textAlign: 'center', color: '#888' }}>PSIR has no items</td>
+                    <td>
+                      <button onClick={() => handleDeletePSIR(psirIdx)} style={{ color: 'red', fontWeight: 'bold' }}>
+                        Delete PSIR
+                      </button>
+                    </td>
+                  </tr>
+                )
+              );
+            })
           )}
         </tbody>
       </table>
