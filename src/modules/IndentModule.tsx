@@ -977,10 +977,13 @@ const IndentModule: React.FC<IndentModuleProps> = ({ user }) => {
             {indents.map((indent, indentIndex) =>
               indent.items.map((item, itemIdx) => {
                 const analysis = getIndentAnalysis(item.itemCode, indentIndex, item.qty);
-                // Show available FOR this indent (can be negative when remaining stock is negative)
-                const availableForIndent = typeof analysis.availableForThisIndent === 'number'
-                  ? analysis.availableForThisIndent
-                  : ((analysis.totalStock || 0) - (analysis.previousIndentsQty || 0));
+                // Compute available FOR this indent explicitly (includes PO quantity)
+                const availableForIndent = (Number(analysis.totalStock || 0) + Number(analysis.poQuantity || 0)) - Number(analysis.previousIndentsQty || 0) - (Number(item.qty) || 0);
+
+                // Debug log to help reproduce why values may appear as zero instead of negative
+                if (availableForIndent < 0) {
+                  console.debug('[IndentModule] Negative availableForIndent', { indentNo: indent.indentNo, itemCode: item.itemCode, totalStock: analysis.totalStock, poQuantity: analysis.poQuantity, previousIndentsQty: analysis.previousIndentsQty, itemQty: item.qty, availableForIndent });
+                }
                 
                 return (
                   <tr key={`${indentIndex}-${itemIdx}`}>
