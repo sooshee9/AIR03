@@ -515,15 +515,28 @@ const PSIRModule: React.FC = () => {
 
   // Auto-create PSIR records from ALL purchase orders once they are loaded
   useEffect(() => {
+    const poCount = purchaseOrders.length;
+    const processedCount = processedPOs.size;
+    const unprocessedCount = poCount - processedCount;
+    
     console.debug('[PSIRModule] Auto-import check:', { 
-      purchaseOrdersCount: purchaseOrders.length, 
+      purchaseOrdersCount: poCount,
+      processedPOsCount: processedCount,
+      unprocessedCount: unprocessedCount,
       psirsCount: psirs.length 
     });
-    if (purchaseOrders.length > 0 && psirs.length === 0) {
-      console.info('[PSIRModule] Auto-import triggered - importing', purchaseOrders.length, 'purchase orders');
+    
+    // Trigger import if:
+    // 1. We have unprocessed purchase orders, OR
+    // 2. We have purchase orders but psirs is empty (first load)
+    if ((unprocessedCount > 0 || poCount > 0) && processedPOs.size === 0) {
+      console.info('[PSIRModule] Auto-import triggered - importing', poCount, 'purchase orders');
+      importAllPurchaseOrdersToPSIR();
+    } else if (unprocessedCount > 0 && psirs.length > 0) {
+      console.info('[PSIRModule] Auto-import triggered - importing', unprocessedCount, 'unprocessed purchase orders');
       importAllPurchaseOrdersToPSIR();
     }
-  }, [purchaseOrders]);
+  }, [purchaseOrders, processedPOs]);
 
   const handleAddItem = () => {
     if (!itemInput.itemName || !itemInput.itemCode) {
@@ -952,8 +965,21 @@ const PSIRModule: React.FC = () => {
 
   // Listen for purchase data updates from PurchaseModule so PO Qty column refreshes in same-window
   useEffect(() => {
-    const handler = (_e: any) => {
+    const handler = (e: any) => {
       try {
+        console.debug('[PSIRModule] Received purchaseOrders.updated event', e);
+        // Force a rerender by shallow-copying psirs state
+        setPsirs(prev => prev.map(p => ({ ...p, items: Array.isArray(p.items) ? p.items.map(i => ({ ...i })) : p.items })));
+        // Also refresh current newPSIR items (if any) to update PO Qty shown in 'Items in Current PSIR'
+        setNewPSIR(prev => ({ ...prev, items: Array.isArray(prev.items) ? prev.items.map(it => ({ ...it })) : prev.items }));
+      } catch (err) {
+        // ignore
+      }
+    };
+
+    const handlerPurchaseData = (e: any) => {
+      try {
+        console.debug('[PSIRModule] Received purchaseData.updated event', e);
         // Force a rerender by shallow-copying psirs state
         setPsirs(prev => prev.map(p => ({ ...p, items: Array.isArray(p.items) ? p.items.map(i => ({ ...i })) : p.items })));
         // Also refresh current newPSIR items (if any) to update PO Qty shown in 'Items in Current PSIR'
@@ -965,29 +991,21 @@ const PSIRModule: React.FC = () => {
 
     try {
       bus.addEventListener('purchaseOrders.updated', handler as EventListener);
-      bus.addEventListener('purchaseData.updated', handler as EventListener);
+      bus.addEventListener('purchaseData.updated', handlerPurchaseData as EventListener);
+      console.debug('[PSIRModule] Registered event listeners for purchaseOrders.updated and purchaseData.updated');
     } catch (err) {
-      /* ignore */
+      console.error('[PSIRModule] Failed to register event listeners:', err);
     }
 
     return () => {
       try {
         bus.removeEventListener('purchaseOrders.updated', handler as EventListener);
-        bus.removeEventListener('purchaseData.updated', handler as EventListener);
+        bus.removeEventListener('purchaseData.updated', handlerPurchaseData as EventListener);
       } catch (err) {
         /* ignore */
       }
     };
   }, []);
-
-  const dumpPurchaseOrders = () => {
-    try {
-      console.log('[PSIR DEBUG] purchaseOrders:', purchaseOrders);
-      alert('purchaseOrders printed to console');
-    } catch (err) {
-      alert('Error reading purchaseOrders: ' + String(err));
-    }
-  };
 
   // One-time sync (DISABLED): We no longer auto-fill PSIR.qtyReceived from Purchase PO Qty. This used to auto-populate missing qtyReceived values.
   // The logic is preserved here as a manual operation available from the debug panel ("Sync Empty PO into PSIR").
@@ -1084,10 +1102,27 @@ const PSIRModule: React.FC = () => {
       {/* Import Controls */}
       <div style={{ marginBottom: 16, padding: 12, background: '#e8f5e8', border: '1px solid #4caf50', borderRadius: 6 }}>
         <h3>Import All Purchase Orders/Indents</h3>
-        <p style={{ marginBottom: 8 }}>Processed: {processedPOs.size} purchase orders/indents</p>
+        <div style={{ marginBottom: 12, fontSize: '14px', lineHeight: 1.6 }}>
+          <div><strong>Status:</strong></div>
+          <div>📋 Purchase Orders Loaded: <span style={{ fontWeight: 'bold', color: purchaseOrders.length > 0 ? '#4caf50' : '#f44336' }}>{purchaseOrders.length}</span></div>
+          <div>✅ Processed POs/Indents: <span style={{ fontWeight: 'bold' }}>{processedPOs.size}</span></div>
+          <div>📦 PSIR Records: <span style={{ fontWeight: 'bold' }}>{psirs.length}</span></div>
+          <div>👤 User: <span style={{ fontWeight: 'bold', color: userUid ? '#4caf50' : '#f44336' }}>{userUid ? '✓ Logged in' : '✗ Not authenticated'}</span></div>
+        </div>
+        <p style={{ marginBottom: 8, fontSize: '13px', color: '#666' }}>
+          {purchaseOrders.length === 0 ? '⚠️ No purchase orders loaded yet' : `Ready to import ${purchaseOrders.length} purchase orders`}
+        </p>
         <button 
           onClick={importAllPurchaseOrdersToPSIR}
-          style={{ padding: '8px 16px', backgroundColor: '#4caf50', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer' }}
+          disabled={purchaseOrders.length === 0 || !userUid}
+          style={{ 
+            padding: '8px 16px', 
+            backgroundColor: purchaseOrders.length === 0 || !userUid ? '#ccc' : '#4caf50', 
+            color: 'white', 
+            border: 'none', 
+            borderRadius: 4, 
+            cursor: purchaseOrders.length === 0 || !userUid ? 'not-allowed' : 'pointer' 
+          }}
         >
           Import All Purchase Orders to PSIR
         </button>
@@ -1102,7 +1137,28 @@ const PSIRModule: React.FC = () => {
           {psirDebugOpen ? 'Hide PSIR Debug' : 'Show PSIR Debug'}
         </button>
         <button onClick={generatePSIRDebugReport} style={{ padding: '6px 10px', marginRight: 8, cursor: 'pointer' }}>Generate PSIR Debug Report</button>
-        <button onClick={dumpPurchaseOrders} style={{ padding: '6px 10px', cursor: 'pointer' }}>Dump purchaseOrders</button>
+        <button 
+          onClick={() => {
+            try {
+              console.log('[PSIR DEBUG] purchaseOrders:', purchaseOrders);
+              console.log('[PSIR DEBUG] purchaseData:', purchaseData);
+              console.log('[PSIR DEBUG] psirs:', psirs);
+              setPsirDebugOutput(formatJSON({ 
+                purchaseOrders, 
+                purchaseData,
+                psirs,
+                message: 'Check browser console for full details'
+              }));
+              setPsirDebugOpen(true);
+              alert('Data printed to console. Check browser DevTools (F12)');
+            } catch (err) {
+              alert('Error reading data: ' + String(err));
+            }
+          }} 
+          style={{ padding: '6px 10px', cursor: 'pointer', background: '#ff9800', color: 'white', border: 'none', borderRadius: 4 }}
+        >
+          🔍 Inspect All Data
+        </button>
       </div>
       
       {psirDebugOpen && (
