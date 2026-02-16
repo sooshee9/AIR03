@@ -1302,17 +1302,15 @@ const PSIRModule: React.FC = () => {
             console.log('[PSIR] Manual refresh: Forcing re-fetch from Firestore');
             if (userUid) {
               try {
-                const freshData = await (async () => {
-                  // Use getPurchaseOrders to fetch fresh data
-                  return new Promise((resolve) => {
-                    // Re-trigger the subscription to get fresh data
-                    const unsub = subscribePsirs(userUid, (docs) => {
-                      console.log('[PSIR] Manual refresh completed - fresh data:', docs.length, 'records');
-                      resolve(docs);
-                      unsub(); // Unsubscribe after getting data
-                    });
+                await new Promise((resolve) => {
+                  // Re-trigger the subscription to get fresh data
+                  const unsub = subscribePsirs(userUid, (docs) => {
+                    console.log('[PSIR] Manual refresh completed - fresh data:', docs.length, 'records');
+                    console.log('[PSIR] Fresh document IDs:', docs.map(d => d.id));
+                    resolve(null);
+                    unsub(); // Unsubscribe after getting data
                   });
-                })();
+                });
                 alert('✅ Manual refresh completed! Check console for fresh data.');
               } catch (err) {
                 console.error('[PSIR] Manual refresh failed:', err);
