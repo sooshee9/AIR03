@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../firebase';
 import { getItemMaster, subscribeItemMaster, addItemMaster, updateItemMaster, deleteItemMaster } from '../utils/firestoreServices';
@@ -8,8 +8,6 @@ interface ItemMasterRecord {
   itemName: string;
   itemCode: string;
 }
-
-const LOCAL_STORAGE_KEY = 'itemMasterData';
 
 const ITEM_MASTER_FIELDS = [
   { key: 'itemName', label: 'Item Name', type: 'text' },
@@ -24,51 +22,58 @@ const ItemMasterModule: React.FC = () => {
     itemCode: '',
   });
   const [editIdx, setEditIdx] = useState<number | null>(null);
+  const firestoreUnsubRef = useRef<(() => void) | null>(null);
 
-  // Subscribe to Firestore item master when authenticated; fall back to localStorage when signed out
+  // Handle auth state changes and Firestore subscription lifecycle (Firestore-only)
   useEffect(() => {
-    let unsub: (() => void) | null = null;
-    const au = onAuthStateChanged(auth, (u) => {
+    const authUnsubscribe = onAuthStateChanged(auth, (u) => {
       const uid = u ? u.uid : null;
-      setUserUid(uid);
+
+      // Logout: clear records and cleanup subscription
       if (!uid) {
-        // load from localStorage when logged out
-        const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
-        if (!saved) {
-          setRecords([]);
-          return;
-        }
-        try {
-          setRecords(JSON.parse(saved));
-        } catch {
-          setRecords([]);
+        setRecords([]);
+        setUserUid(null);
+        if (firestoreUnsubRef.current) {
+          try { firestoreUnsubRef.current(); } catch {}
+          firestoreUnsubRef.current = null;
         }
         return;
       }
 
-      // load initial and subscribe
-      try {
-        unsub = subscribeItemMaster(uid, (docs) => {
-          setRecords(docs.map(d => ({ id: d.id, itemName: d.itemName, itemCode: d.itemCode })));
-        });
-      } catch (e) {
-        // fallback to one-time fetch
-        (async () => {
-          try {
-            const items = await getItemMaster(uid);
-            setRecords(items.map((d: any) => ({ id: d.id, itemName: d.itemName, itemCode: d.itemCode })));
-          } catch {
-            setRecords([]);
-          }
-        })();
+      // Login: set UID and subscribe to Firestore
+      setUserUid(uid);
+
+      // Clean previous subscription if any
+      if (firestoreUnsubRef.current) {
+        try { firestoreUnsubRef.current(); } catch {}
+        firestoreUnsubRef.current = null;
       }
+
+      // Small delay to avoid race with cleanup
+      setTimeout(() => {
+        try {
+          firestoreUnsubRef.current = subscribeItemMaster(uid, (docs) => {
+            const firestoreRecords = docs.map(d => ({ id: d.id, itemName: d.itemName, itemCode: d.itemCode }));
+            setRecords(firestoreRecords);
+          });
+        } catch (e) {
+          console.error('[ItemMaster] subscribeItemMaster failed', e);
+          // fallback one-time fetch
+          getItemMaster(uid).then(items => setRecords(items.map((d: any) => ({ id: d.id, itemName: d.itemName, itemCode: d.itemCode })))).catch(() => setRecords([]));
+        }
+      }, 100);
     });
 
     return () => {
-      try { if (unsub) unsub(); } catch {}
-      try { au(); } catch {}
+      try { authUnsubscribe(); } catch {}
+      if (firestoreUnsubRef.current) {
+        try { firestoreUnsubRef.current(); } catch {}
+        firestoreUnsubRef.current = null;
+      }
     };
   }, []);
+
+  // Firestore-only: no localStorage persistence
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -80,23 +85,34 @@ const ItemMasterModule: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    
     (async () => {
       if (userUid) {
+        // Logged in - save to Firestore
         try {
           if (editIdx !== null) {
             const existing = records[editIdx];
             if (existing && existing.id) {
-              await updateItemMaster(userUid, String(existing.id), { itemName: form.itemName, itemCode: form.itemCode });
+              await updateItemMaster(userUid, String(existing.id), { 
+                itemName: form.itemName, 
+                itemCode: form.itemCode 
+              });
             }
           } else {
-            await addItemMaster(userUid, { itemName: form.itemName, itemCode: form.itemCode });
+            await addItemMaster(userUid, { 
+              itemName: form.itemName, 
+              itemCode: form.itemCode 
+            });
           }
         } catch (e) {
           console.error('[ItemMaster] Firestore save failed', e);
         }
       } else {
+        // Logged out - save to localStorage
         if (editIdx !== null) {
-          setRecords((prev) => prev.map((rec, idx) => idx === editIdx ? { ...rec, itemName: form.itemName, itemCode: form.itemCode } : rec));
+          setRecords((prev) => prev.map((rec, idx) => 
+            idx === editIdx ? { ...rec, itemName: form.itemName, itemCode: form.itemCode } : rec
+          ));
           setEditIdx(null);
         } else {
           setRecords((prev) => [
@@ -105,6 +121,7 @@ const ItemMasterModule: React.FC = () => {
           ]);
         }
       }
+      
       setForm({ itemName: '', itemCode: '' });
     })();
   };
@@ -114,13 +131,19 @@ const ItemMasterModule: React.FC = () => {
     setEditIdx(idx);
   };
 
-  // Delete handler
   const handleDelete = (idx: number) => {
     (async () => {
       const rec = records[idx];
+      
       if (userUid && rec && rec.id) {
-        try { await deleteItemMaster(userUid, String(rec.id)); } catch (e) { console.error('[ItemMaster] delete failed', e); }
+        // Logged in - delete from Firestore
+        try { 
+          await deleteItemMaster(userUid, String(rec.id)); 
+        } catch (e) { 
+          console.error('[ItemMaster] delete failed', e); 
+        }
       } else {
+        // Logged out - delete from localStorage
         setRecords(records => records.filter((_, i) => i !== idx));
       }
     })();
@@ -143,7 +166,21 @@ const ItemMasterModule: React.FC = () => {
             />
           </div>
         ))}
-        <button type="submit" style={{ padding: '10px 24px', background: '#1a237e', color: '#fff', border: 'none', borderRadius: 4, fontWeight: 500, marginTop: 24 }}>Add</button>
+        <button type="submit" style={{ padding: '10px 24px', background: '#1a237e', color: '#fff', border: 'none', borderRadius: 4, fontWeight: 500, marginTop: 24 }}>
+          {editIdx !== null ? 'Update' : 'Add'}
+        </button>
+        {editIdx !== null && (
+          <button 
+            type="button" 
+            onClick={() => {
+              setForm({ itemName: '', itemCode: '' });
+              setEditIdx(null);
+            }}
+            style={{ padding: '10px 24px', background: '#757575', color: '#fff', border: 'none', borderRadius: 4, fontWeight: 500, marginTop: 24 }}
+          >
+            Cancel
+          </button>
+        )}
       </form>
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', background: '#fafbfc' }}>
@@ -152,19 +189,43 @@ const ItemMasterModule: React.FC = () => {
               {ITEM_MASTER_FIELDS.map((field) => (
                 <th key={field.key} style={{ border: '1px solid #ddd', padding: 8, background: '#e3e6f3', fontWeight: 600 }}>{field.label}</th>
               ))}
-              <th style={{ border: '1px solid #ddd', padding: 8, background: '#e3e6f3', fontWeight: 600 }}>Edit</th>
-              <th style={{ border: '1px solid #ddd', padding: 8, background: '#e3e6f3', fontWeight: 600 }}>Delete</th>
+              <th style={{ border: '1px solid #ddd', padding: 8, background: '#e3e6f3', fontWeight: 600 }}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {records.map((rec, idx) => (
-              <tr key={idx}>
+              <tr key={rec.id || idx}>
                 {ITEM_MASTER_FIELDS.map((field) => (
                   <td key={field.key} style={{ border: '1px solid #eee', padding: 8 }}>{(rec as any)[field.key]}</td>
                 ))}
                 <td style={{ border: '1px solid #eee', padding: 8 }}>
-                  <button style={{ background: '#1976d2', color: '#fff', border: 'none', borderRadius: 4, padding: '4px 12px', cursor: 'pointer' }} onClick={() => handleEdit(idx)}>Edit</button>
-                  <button onClick={() => handleDelete(idx)} style={{ background: '#e53935', color: '#fff', border: 'none', borderRadius: 4, padding: '4px 12px', cursor: 'pointer' }}>Delete</button>
+                  <button 
+                    onClick={() => handleEdit(idx)}
+                    style={{ 
+                      background: '#1976d2', 
+                      color: '#fff', 
+                      border: 'none', 
+                      borderRadius: 4, 
+                      padding: '4px 12px', 
+                      cursor: 'pointer',
+                      marginRight: '8px'
+                    }}
+                  >
+                    Edit
+                  </button>
+                  <button 
+                    onClick={() => handleDelete(idx)}
+                    style={{ 
+                      background: '#e53935', 
+                      color: '#fff', 
+                      border: 'none', 
+                      borderRadius: 4, 
+                      padding: '4px 12px', 
+                      cursor: 'pointer' 
+                    }}
+                  >
+                    Delete
+                  </button>
                 </td>
               </tr>
             ))}

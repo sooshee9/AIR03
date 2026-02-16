@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import bus from '../utils/eventBus';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../firebase';
-import { addPsir, updatePsir, subscribePsirs, deletePsir } from '../utils/psirService';
+import { addPsir, updatePsir, subscribePsirs } from '../utils/psirService';
 import { getItemMaster, getPurchaseData, getIndentData, getStockRecords, getPurchaseOrders, updatePurchaseData, updatePurchaseOrder } from '../utils/firestoreServices';
 
 interface PSIRItem {
@@ -82,15 +82,24 @@ const PSIRModule: React.FC = () => {
   const [userUid, setUserUid] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => setUserUid(u ? u.uid : null));
+    const unsub = onAuthStateChanged(auth, (u) => {
+      const uid = u ? u.uid : null;
+      console.info('[PSIRModule] Auth state changed - userUid:', uid);
+      setUserUid(uid);
+    });
     return () => unsub();
   }, []);
 
   // Subscribe to Firestore PSIRs for the logged-in user and apply realtime updates
   useEffect(() => {
     let unsub: (() => void) | null = null;
-    if (!userUid) return;
+    if (!userUid) {
+      console.debug('[PSIRModule] Skipping PSIR subscription - no userUid');
+      return;
+    }
+    console.debug('[PSIRModule] Setting up PSIR subscription for userId:', userUid);
     unsub = subscribePsirs(userUid, (docs) => {
+      console.debug('[PSIRModule][Firestore] Subscription callback received', docs.length, 'PSIR documents');
       const newPsirs = docs.map(d => ({ ...d })) as any[];
       // normalize items array
       const normalized = newPsirs.map((psir: any) => ({ ...psir, items: Array.isArray(psir.items) ? psir.items : [] }));
@@ -98,10 +107,11 @@ const PSIRModule: React.FC = () => {
       const existingPOs = new Set(normalized.map((psir: any) => psir.poNo).filter(Boolean));
       const existingIndents = new Set(normalized.map((psir: any) => `INDENT::${psir.indentNo}`).filter(id => id !== 'INDENT::'));
       setProcessedPOs(new Set([...existingPOs, ...existingIndents]));
-      console.debug('[PSIRModule][Firestore] Subscribed and applied PSIR docs', normalized.length);
+      console.debug('[PSIRModule][Firestore] Updated local state with', normalized.length, 'PSIRs');
     });
 
     return () => {
+      console.debug('[PSIRModule] Unsubscribing from PSIR subscription');
       if (unsub) unsub();
     };
   }, [userUid]);
@@ -110,12 +120,24 @@ const PSIRModule: React.FC = () => {
   useEffect(() => {
     const loadPurchaseOrders = async () => {
       try {
-        if (!userUid) return;
+        if (!userUid) {
+          console.debug('[PSIRModule] Skipping loadPurchaseOrders: no userUid');
+          return;
+        }
+        console.info('[PSIRModule] Starting purchase orders load for user:', userUid);
         const orders = await getPurchaseOrders(userUid);
+        console.debug('[PSIRModule] getPurchaseOrders returned:', {
+          isArray: Array.isArray(orders),
+          length: Array.isArray(orders) ? orders.length : 'N/A',
+          data: orders
+        });
+        
         if (Array.isArray(orders)) {
+          console.info('[PSIRModule][Init] Loaded', orders.length, 'purchase orders from Firestore');
           setPurchaseOrders(orders as any as PurchaseOrder[]);
           if (orders.length > 0 && !newPSIR.poNo) {
             const latestOrder: any = orders[orders.length - 1];
+            console.debug('[PSIRModule] Auto-filling first PO:', latestOrder.poNo);
             setNewPSIR(prev => ({
               ...prev,
               poNo: latestOrder.poNo || '',
@@ -123,7 +145,8 @@ const PSIRModule: React.FC = () => {
               indentNo: latestOrder.indentNo || '',
             }));
           }
-          console.debug('[PSIRModule][Init] Loaded purchaseOrders from Firestore:', orders);
+        } else {
+          console.error('[PSIRModule][Init] getPurchaseOrders returned non-array:', typeof orders);
         }
       } catch (e) {
         console.error('[PSIRModule][Init] Error loading purchaseOrders from Firestore:', e);
@@ -220,6 +243,7 @@ const PSIRModule: React.FC = () => {
   useEffect(() => {
     const loadData = async () => {
       try {
+        console.info('[PSIRModule] Starting data load for user:', userUid);
         const [itemMasterData, purchaseDataData, indentDataData, stockDataData] = await Promise.all([
           getItemMaster(userUid || ''),
           getPurchaseData(userUid || ''),
@@ -227,25 +251,40 @@ const PSIRModule: React.FC = () => {
           getStockRecords(userUid || ''),
         ]);
         
+        console.debug('[PSIRModule] Data load completed:', {
+          itemMasterCount: Array.isArray(itemMasterData) ? itemMasterData.length : 'not-array',
+          purchaseDataCount: Array.isArray(purchaseDataData) ? purchaseDataData.length : 'not-array',
+          indentDataCount: Array.isArray(indentDataData) ? indentDataData.length : 'not-array',
+          stockDataCount: Array.isArray(stockDataData) ? stockDataData.length : 'not-array',
+        });
+        
         if (Array.isArray(itemMasterData)) {
           setItemMaster(itemMasterData as any as { itemName: string; itemCode: string }[]);
           setItemNames((itemMasterData as any[]).map((item: any) => item.itemName).filter(Boolean));
           console.debug('[PSIRModule][Init] Loaded itemMaster from Firestore:', itemMasterData);
+        } else {
+          console.warn('[PSIRModule][Init] itemMasterData is not an array:', typeof itemMasterData);
         }
         
         if (Array.isArray(purchaseDataData)) {
           setPurchaseData(purchaseDataData);
-          console.debug('[PSIRModule][Init] Loaded purchaseData from Firestore:', purchaseDataData);
+          console.debug('[PSIRModule][Init] Loaded purchaseData from Firestore:', purchaseDataData.length, 'records');
+        } else {
+          console.warn('[PSIRModule][Init] purchaseDataData is not an array:', typeof purchaseDataData);
         }
 
         if (Array.isArray(indentDataData)) {
           setIndentData(indentDataData);
-          console.debug('[PSIRModule][Init] Loaded indentData from Firestore:', indentDataData);
+          console.debug('[PSIRModule][Init] Loaded indentData from Firestore:', indentDataData.length, 'records');
+        } else {
+          console.warn('[PSIRModule][Init] indentDataData is not an array:', typeof indentDataData);
         }
 
         if (Array.isArray(stockDataData)) {
           setStockRecords(stockDataData);
-          console.debug('[PSIRModule][Init] Loaded stockRecords from Firestore:', stockDataData);
+          console.debug('[PSIRModule][Init] Loaded stockRecords from Firestore:', stockDataData.length, 'records');
+        } else {
+          console.warn('[PSIRModule][Init] stockDataData is not an array:', typeof stockDataData);
         }
       } catch (e) {
         console.error('[PSIRModule][Init] Error loading initial data from Firestore:', e);
@@ -254,13 +293,21 @@ const PSIRModule: React.FC = () => {
 
     if (userUid) {
       loadData();
+    } else {
+      console.warn('[PSIRModule] Skipping data load - userUid is not set');
     }
   }, [userUid]);
 
   // Import ALL purchase orders/indents to PSIR
   const importAllPurchaseOrdersToPSIR = () => {
     try {
+      console.info('[PSIRModule] importAllPurchaseOrdersToPSIR called');
+      console.debug('[PSIRModule] purchaseOrders:', purchaseOrders);
+      console.debug('[PSIRModule] psirs:', psirs);
+      console.debug('[PSIRModule] userUid:', userUid);
+      
       if (purchaseOrders.length === 0) {
+        console.warn('[PSIRModule] No purchase orders to import');
         alert('No purchase orders found');
         return;
       }
@@ -268,12 +315,17 @@ const PSIRModule: React.FC = () => {
       let importedCount = 0;
       const newPSIRs: PSIR[] = [];
 
-      purchaseOrders.forEach((order) => {
+      purchaseOrders.forEach((order, orderIdx) => {
         const poNo = String(order.poNo || '').trim();
         const indentNo = String(order.indentNo || '').trim();
         
+        console.debug(`[PSIRModule] Processing order ${orderIdx}:`, { poNo, indentNo, supplierName: order.supplierName });
+        
         // Skip if both PO and Indent are empty
-        if (!poNo && !indentNo) return;
+        if (!poNo && !indentNo) {
+          console.debug(`[PSIRModule] Skipping order ${orderIdx} - both poNo and indentNo are empty`);
+          return;
+        }
 
         // Find matching purchaseData entry to get OA NO
         let oaNoFromPurchase = '';
@@ -454,17 +506,23 @@ const PSIRModule: React.FC = () => {
       });
 
       if (importedCount > 0) {
+        console.info('[PSIRModule] Import complete - imported', importedCount, 'records, saving to Firestore...');
         setPsirs(prev => {
           const updated = [...prev, ...newPSIRs];
-          newPSIRs.forEach(psir => {
+          console.debug('[PSIRModule] Updated local PSIRs state with', newPSIRs.length, 'new records');
+          newPSIRs.forEach((psir, idx) => {
             if (userUid) {
+              console.debug('[PSIRModule] Saving PSIR', idx, 'to Firestore for userId:', userUid);
               (async () => {
                 try {
-                  await addPsir(userUid, psir);
+                  const result = await addPsir(userUid, psir);
+                  console.debug('[PSIRModule] Successfully saved PSIR', idx, 'with id:', result);
                 } catch (e) {
-                  console.error('[PSIRModule] Failed to add PSIR to Firestore', e);
+                  console.error('[PSIRModule] Failed to add PSIR to Firestore', idx, e);
                 }
               })();
+            } else {
+              console.warn('[PSIRModule] Cannot save PSIR - no userUid');
             }
           });
           try { bus.dispatchEvent(new CustomEvent('psir.updated', { detail: { psirs: updated } })); } catch (err) {}
@@ -472,6 +530,7 @@ const PSIRModule: React.FC = () => {
         });
         alert(`✅ Successfully imported ${importedCount} purchase orders/indents to PSIR`);
       } else {
+        console.warn('[PSIRModule] No new purchase orders/indents were imported');
         alert('No new purchase orders/indents to import (all are already processed)');
       }
 
@@ -481,10 +540,30 @@ const PSIRModule: React.FC = () => {
     }
   };
 
-  // Auto-create PSIR records from ALL purchase orders on component mount
+  // Auto-create PSIR records from ALL purchase orders once they are loaded
   useEffect(() => {
-    importAllPurchaseOrdersToPSIR();
-  }, []);
+    const poCount = purchaseOrders.length;
+    const processedCount = processedPOs.size;
+    const unprocessedCount = poCount - processedCount;
+    
+    console.debug('[PSIRModule] Auto-import check:', { 
+      purchaseOrdersCount: poCount,
+      processedPOsCount: processedCount,
+      unprocessedCount: unprocessedCount,
+      psirsCount: psirs.length 
+    });
+    
+    // Trigger import if:
+    // 1. We have unprocessed purchase orders, OR
+    // 2. We have purchase orders but psirs is empty (first load)
+    if ((unprocessedCount > 0 || poCount > 0) && processedPOs.size === 0) {
+      console.info('[PSIRModule] Auto-import triggered - importing', poCount, 'purchase orders');
+      importAllPurchaseOrdersToPSIR();
+    } else if (unprocessedCount > 0 && psirs.length > 0) {
+      console.info('[PSIRModule] Auto-import triggered - importing', unprocessedCount, 'unprocessed purchase orders');
+      importAllPurchaseOrdersToPSIR();
+    }
+  }, [purchaseOrders, processedPOs]);
 
   const handleAddItem = () => {
     if (!itemInput.itemName || !itemInput.itemCode) {
@@ -647,7 +726,6 @@ const PSIRModule: React.FC = () => {
 
   const handleDeleteItem = (psirIdx: number, itemIdx: number) => {
     setPsirs(prevPsirs => {
-      const target = prevPsirs[psirIdx];
       const updated = prevPsirs
         .map((p, pIdx) => {
           if (pIdx !== psirIdx) return p;
@@ -656,47 +734,13 @@ const PSIRModule: React.FC = () => {
         .filter(p => p.items.length > 0);
       
       // Update in Firestore
+      const target = prevPsirs[psirIdx];
       if (userUid && (target as any).id) {
         (async () => {
           try {
-            // Find the updated PSIR by ID since index may have changed after filtering
-            const updatedRecord = updated.find(p => (p as any).id === (target as any).id);
-            if (updatedRecord) {
-              await updatePsir((target as any).id, updatedRecord);
-            }
+            await updatePsir((target as any).id, updated[psirIdx]);
           } catch (e) {
             console.error('[PSIRModule] Failed to update PSIR in Firestore after item delete', e);
-          }
-        })();
-      }
-      
-      try { bus.dispatchEvent(new CustomEvent('psir.updated', { detail: { psirs: updated } })); } catch (err) {}
-      return updated;
-    });
-  };
-
-  const handleDeletePSIR = (psirIdx: number) => {
-    const psirToDelete = psirs[psirIdx];
-    if (!psirToDelete || !(psirToDelete as any).id) {
-      console.error('[PSIRModule] Cannot delete PSIR: missing ID');
-      return;
-    }
-
-    if (!window.confirm(`Delete PSIR for PO ${psirToDelete.poNo || psirToDelete.indentNo}? This cannot be undone.`)) {
-      return;
-    }
-
-    setPsirs(prevPsirs => {
-      const updated = prevPsirs.filter((_, idx) => idx !== psirIdx);
-      
-      // Delete from Firestore
-      if (userUid) {
-        (async () => {
-          try {
-            await deletePsir((psirToDelete as any).id);
-            console.log('[PSIRModule] Successfully deleted PSIR from Firestore:', (psirToDelete as any).id);
-          } catch (e) {
-            console.error('[PSIRModule] Failed to delete PSIR from Firestore', e);
           }
         })();
       }
@@ -948,8 +992,21 @@ const PSIRModule: React.FC = () => {
 
   // Listen for purchase data updates from PurchaseModule so PO Qty column refreshes in same-window
   useEffect(() => {
-    const handler = (_e: any) => {
+    const handler = (e: any) => {
       try {
+        console.debug('[PSIRModule] Received purchaseOrders.updated event', e);
+        // Force a rerender by shallow-copying psirs state
+        setPsirs(prev => prev.map(p => ({ ...p, items: Array.isArray(p.items) ? p.items.map(i => ({ ...i })) : p.items })));
+        // Also refresh current newPSIR items (if any) to update PO Qty shown in 'Items in Current PSIR'
+        setNewPSIR(prev => ({ ...prev, items: Array.isArray(prev.items) ? prev.items.map(it => ({ ...it })) : prev.items }));
+      } catch (err) {
+        // ignore
+      }
+    };
+
+    const handlerPurchaseData = (e: any) => {
+      try {
+        console.debug('[PSIRModule] Received purchaseData.updated event', e);
         // Force a rerender by shallow-copying psirs state
         setPsirs(prev => prev.map(p => ({ ...p, items: Array.isArray(p.items) ? p.items.map(i => ({ ...i })) : p.items })));
         // Also refresh current newPSIR items (if any) to update PO Qty shown in 'Items in Current PSIR'
@@ -961,29 +1018,21 @@ const PSIRModule: React.FC = () => {
 
     try {
       bus.addEventListener('purchaseOrders.updated', handler as EventListener);
-      bus.addEventListener('purchaseData.updated', handler as EventListener);
+      bus.addEventListener('purchaseData.updated', handlerPurchaseData as EventListener);
+      console.debug('[PSIRModule] Registered event listeners for purchaseOrders.updated and purchaseData.updated');
     } catch (err) {
-      /* ignore */
+      console.error('[PSIRModule] Failed to register event listeners:', err);
     }
 
     return () => {
       try {
         bus.removeEventListener('purchaseOrders.updated', handler as EventListener);
-        bus.removeEventListener('purchaseData.updated', handler as EventListener);
+        bus.removeEventListener('purchaseData.updated', handlerPurchaseData as EventListener);
       } catch (err) {
         /* ignore */
       }
     };
   }, []);
-
-  const dumpPurchaseOrders = () => {
-    try {
-      console.log('[PSIR DEBUG] purchaseOrders:', purchaseOrders);
-      alert('purchaseOrders printed to console');
-    } catch (err) {
-      alert('Error reading purchaseOrders: ' + String(err));
-    }
-  };
 
   // One-time sync (DISABLED): We no longer auto-fill PSIR.qtyReceived from Purchase PO Qty. This used to auto-populate missing qtyReceived values.
   // The logic is preserved here as a manual operation available from the debug panel ("Sync Empty PO into PSIR").
@@ -1080,10 +1129,27 @@ const PSIRModule: React.FC = () => {
       {/* Import Controls */}
       <div style={{ marginBottom: 16, padding: 12, background: '#e8f5e8', border: '1px solid #4caf50', borderRadius: 6 }}>
         <h3>Import All Purchase Orders/Indents</h3>
-        <p style={{ marginBottom: 8 }}>Processed: {processedPOs.size} purchase orders/indents</p>
+        <div style={{ marginBottom: 12, fontSize: '14px', lineHeight: 1.6 }}>
+          <div><strong>Status:</strong></div>
+          <div>📋 Purchase Orders Loaded: <span style={{ fontWeight: 'bold', color: purchaseOrders.length > 0 ? '#4caf50' : '#f44336' }}>{purchaseOrders.length}</span></div>
+          <div>✅ Processed POs/Indents: <span style={{ fontWeight: 'bold' }}>{processedPOs.size}</span></div>
+          <div>📦 PSIR Records: <span style={{ fontWeight: 'bold' }}>{psirs.length}</span></div>
+          <div>👤 User: <span style={{ fontWeight: 'bold', color: userUid ? '#4caf50' : '#f44336' }}>{userUid ? '✓ Logged in' : '✗ Not authenticated'}</span></div>
+        </div>
+        <p style={{ marginBottom: 8, fontSize: '13px', color: '#666' }}>
+          {purchaseOrders.length === 0 ? '⚠️ No purchase orders loaded yet' : `Ready to import ${purchaseOrders.length} purchase orders`}
+        </p>
         <button 
           onClick={importAllPurchaseOrdersToPSIR}
-          style={{ padding: '8px 16px', backgroundColor: '#4caf50', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer' }}
+          disabled={purchaseOrders.length === 0 || !userUid}
+          style={{ 
+            padding: '8px 16px', 
+            backgroundColor: purchaseOrders.length === 0 || !userUid ? '#ccc' : '#4caf50', 
+            color: 'white', 
+            border: 'none', 
+            borderRadius: 4, 
+            cursor: purchaseOrders.length === 0 || !userUid ? 'not-allowed' : 'pointer' 
+          }}
         >
           Import All Purchase Orders to PSIR
         </button>
@@ -1098,7 +1164,28 @@ const PSIRModule: React.FC = () => {
           {psirDebugOpen ? 'Hide PSIR Debug' : 'Show PSIR Debug'}
         </button>
         <button onClick={generatePSIRDebugReport} style={{ padding: '6px 10px', marginRight: 8, cursor: 'pointer' }}>Generate PSIR Debug Report</button>
-        <button onClick={dumpPurchaseOrders} style={{ padding: '6px 10px', cursor: 'pointer' }}>Dump purchaseOrders</button>
+        <button 
+          onClick={() => {
+            try {
+              console.log('[PSIR DEBUG] purchaseOrders:', purchaseOrders);
+              console.log('[PSIR DEBUG] purchaseData:', purchaseData);
+              console.log('[PSIR DEBUG] psirs:', psirs);
+              setPsirDebugOutput(formatJSON({ 
+                purchaseOrders, 
+                purchaseData,
+                psirs,
+                message: 'Check browser console for full details'
+              }));
+              setPsirDebugOpen(true);
+              alert('Data printed to console. Check browser DevTools (F12)');
+            } catch (err) {
+              alert('Error reading data: ' + String(err));
+            }
+          }} 
+          style={{ padding: '6px 10px', cursor: 'pointer', background: '#ff9800', color: 'white', border: 'none', borderRadius: 4 }}
+        >
+          🔍 Inspect All Data
+        </button>
       </div>
       
       {psirDebugOpen && (
@@ -1523,70 +1610,49 @@ const PSIRModule: React.FC = () => {
               </td>
             </tr>
           ) : (
-            psirs.flatMap((psir, psirIdx) => {
-              const isFirstItemRow = true;
-              return (
-                (psir?.items || []).length > 0 ? (
-                  (psir?.items || []).map((item, itemIdx) => {
-                    const poQty = getPOQtyFor(psir.poNo, psir.indentNo, item.itemCode) || 0;
-                    // Show delete PSIR button only on first item row for each PSIR
-                    const showDeletePsirBtn = itemIdx === 0;
-                    return (
-                    <tr key={`${psirIdx}-${itemIdx}`}>
-                      <td>{psir.receivedDate}</td>
-                      <td>{psir.indentNo}</td>
-                      <td>{psir.oaNo}</td>
-                      <td>{psir.poNo}</td>
-                      <td>{psir.batchNo}</td>
-                      <td>{psir.invoiceNo}</td>
-                      <td>{psir.supplierName}</td>
-                      <td>{item.itemName}</td>
-                      <td>{item.itemCode}</td>
-                      <td>{Math.abs(poQty)}</td>
-                      <td>{item.qtyReceived}</td>
-                      <td>{item.okQty}</td>
-                      <td>{item.rejectQty}</td>
-                      <td>{item.grnNo}</td>
-                      <td>{item.remarks}</td>
-                      <td>
-                        {showDeletePsirBtn && (
-                          <button onClick={() => handleDeletePSIR(psirIdx)} style={{ color: 'red', fontWeight: 'bold' }}>
-                            Delete PSIR
-                          </button>
-                        )}
-                        <button onClick={() => handleEditPSIR(psirIdx)}>Edit</button>
-                        <button onClick={() => handleDeleteItem(psirIdx, itemIdx)}>Delete Item</button>
-                        <button
-                          onClick={() => {
-                            try {
-                              const d = getPOQtyMatchDetails(psir.poNo, psir.indentNo, item.itemCode);
-                              setPsirDebugExtra(formatJSON({ title: 'PO Qty debug for row', d }));
-                              setPsirDebugOpen(true);
-                            } catch (err) {
-                              setPsirDebugExtra('Error computing debug: ' + String(err));
-                              setPsirDebugOpen(true);
-                            }
-                          }}
-                          style={{ marginLeft: 8 }}
-                        >
-                          PO Debug
-                        </button>
-                      </td>
-                    </tr>
-                    );
-                  })
-                ) : (
-                  <tr key={`${psirIdx}-empty`}>
-                    <td colSpan={15} style={{ textAlign: 'center', color: '#888' }}>PSIR has no items</td>
-                    <td>
-                      <button onClick={() => handleDeletePSIR(psirIdx)} style={{ color: 'red', fontWeight: 'bold' }}>
-                        Delete PSIR
-                      </button>
-                    </td>
-                  </tr>
-                )
-              );
-            })
+            psirs.flatMap((psir, psirIdx) => 
+              (psir?.items || []).map((item, itemIdx) => {
+                const poQty = getPOQtyFor(psir.poNo, psir.indentNo, item.itemCode) || 0;
+                return (
+                <tr key={`${psirIdx}-${itemIdx}`}>
+                  <td>{psir.receivedDate}</td>
+                  <td>{psir.indentNo}</td>
+                  <td>{psir.oaNo}</td>
+                  <td>{psir.poNo}</td>
+                  <td>{psir.batchNo}</td>
+                  <td>{psir.invoiceNo}</td>
+                  <td>{psir.supplierName}</td>
+                  <td>{item.itemName}</td>
+                  <td>{item.itemCode}</td>
+                  <td>{Math.abs(poQty)}</td>
+                  <td>{item.qtyReceived}</td>
+                  <td>{item.okQty}</td>
+                  <td>{item.rejectQty}</td>
+                  <td>{item.grnNo}</td>
+                  <td>{item.remarks}</td>
+                  <td>
+                    <button onClick={() => handleEditPSIR(psirIdx)}>Edit</button>
+                    <button onClick={() => handleDeleteItem(psirIdx, itemIdx)}>Delete</button>
+                    <button
+                      onClick={() => {
+                        try {
+                          const d = getPOQtyMatchDetails(psir.poNo, psir.indentNo, item.itemCode);
+                          setPsirDebugExtra(formatJSON({ title: 'PO Qty debug for row', d }));
+                          setPsirDebugOpen(true);
+                        } catch (err) {
+                          setPsirDebugExtra('Error computing debug: ' + String(err));
+                          setPsirDebugOpen(true);
+                        }
+                      }}
+                      style={{ marginLeft: 8 }}
+                    >
+                      PO Debug
+                    </button>
+                  </td>
+                </tr>
+                );
+              })
+            )
           )}
         </tbody>
       </table>

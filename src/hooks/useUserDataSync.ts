@@ -6,16 +6,16 @@ import { collection, onSnapshot } from 'firebase/firestore';
 // Global registry to prevent duplicate subscriptions
 const activeSubscriptions = new Map<string, Array<() => void>>();
 
-// Default collections to sync with Firestore
+// Default collections to sync with Firestore - now under 'users/{uid}/' path
 const DEFAULT_COLLECTIONS = [
   'psirData',
-  'vsri-records',
+  'vsirRecords',
   'inHouseIssueData',
   'vendorIssueData',
   'purchaseData',
-  'itemMasterData',
-  'vendorDeptData',
-  'stock-records',
+  'itemMaster',
+  'vendorDepts',
+  'stockRecords',
   'purchaseOrders'
 ];
 
@@ -48,10 +48,10 @@ export const useUserDataSync = (user: any) => {
     const unsubs: Array<() => void> = [];
 
     try {
-      // Subscribe to each default collection in Firestore
+      // Subscribe to each default collection in Firestore - now using 'users' path
       DEFAULT_COLLECTIONS.forEach(collectionName => {
         try {
-          const collRef = collection(db, 'userData', uid, collectionName);
+          const collRef = collection(db, 'users', uid, collectionName);
           
           const unsub = onSnapshot(
             collRef,
@@ -67,9 +67,12 @@ export const useUserDataSync = (user: any) => {
               bus.dispatchEvent(new CustomEvent('userData.sync.remoteUpdate', { 
                 detail: { uid, collection: collectionName, count: data.length, ts: Date.now() } 
               }));
+              
+              console.debug(`[useUserDataSync] Collection '${collectionName}' synced:`, data.length, 'documents');
             },
             (error) => {
               if (!componentMountedRef.current) return;
+              console.error(`[useUserDataSync] Error syncing '${collectionName}':`, error);
               bus.dispatchEvent(new CustomEvent('userData.sync.error', { 
                 detail: { uid, collection: collectionName, error: String(error), ts: Date.now() } 
               }));

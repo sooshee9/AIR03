@@ -26,8 +26,6 @@ interface VSRIRecord {
   remarks: string;
 }
 
-const LOCAL_STORAGE_KEY = 'vsri-records';
-
 const VSRI_MODULE_FIELDS = [
   { key: 'receivedDate', label: 'Received Date', type: 'date' },
   { key: 'indentNo', label: 'Indent No', type: 'text' },
@@ -80,88 +78,10 @@ const VSIRModule: React.FC = () => {
   const [psirData, setPsirData] = useState<any[]>([]);
   const [userUid, setUserUid] = useState<string | null>(null);
 
-  // Persist helper: writes to Firestore when logged in, otherwise localStorage
-  // persistVSIRRecords helper is not used; remove to fix build error.
-
-  // Load initial data
+  // Initialize component - set isInitialized to true on mount
   useEffect(() => {
-    const data = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (data) {
-      const parsed = JSON.parse(data);
-      console.log('[VSIR-DEBUG] Initial load from localStorage:', parsed);
-      setRecords(parsed);
-    } else {
-      console.log('[VSIR-DEBUG] No data in localStorage on initial load');
-    }
-    
-    const itemMasterRaw = localStorage.getItem('itemMasterData');
-    if (itemMasterRaw) {
-      try {
-        const parsed = JSON.parse(itemMasterRaw);
-        if (Array.isArray(parsed)) {
-          setItemMaster(parsed);
-          setItemNames(parsed.map((item: any) => item.itemName).filter(Boolean));
-        }
-      } catch {}
-    }
-
-    const vendorDeptData = localStorage.getItem('vendorDeptData');
-    setVendorDeptOrders(vendorDeptData ? JSON.parse(vendorDeptData) : []);
-
-    // Import from vendorIssueData (once on mount) - prefer Firestore-loaded vendorIssues
-    try {
-      const vendorIssuesList: any[] = (userUid && Array.isArray(vendorIssues) && vendorIssues.length) ? vendorIssues : (localStorage.getItem('vendorIssueData') ? JSON.parse(localStorage.getItem('vendorIssueData') as string) : []);
-      if (vendorIssuesList && vendorIssuesList.length) {
-        let cur = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '[]') as VSRIRecord[];
-        let added = false;
-        vendorIssuesList.forEach((issue: any) => {
-          if (!issue?.items) return;
-          issue.items.forEach((it: any) => {
-            const exists = cur.some(
-              r =>
-                (r.poNo || '').toString().trim() === (issue.materialPurchasePoNo || '').toString().trim() &&
-                (r.itemCode || '').toString().trim() === (it.itemCode || '').toString().trim()
-            );
-            if (!exists) {
-              const vendorName =
-                issue.vendorName ||
-                (vendorDeptData
-                  ? JSON.parse(vendorDeptData).find((v: any) => v.materialPurchasePoNo === issue.materialPurchasePoNo)?.vendorName || ''
-                  : '');
-              cur.push({
-                id: Date.now() + Math.floor(Math.random() * 10000),
-                receivedDate: issue.date || '',
-                indentNo: '',
-                poNo: issue.materialPurchasePoNo || '',
-                oaNo: issue.oaNo || '',
-                purchaseBatchNo: issue.batchNo || '',
-                vendorBatchNo: '',
-                dcNo: '', // MANUAL ENTRY - don't auto-populate
-                invoiceDcNo: '', // MANUAL ENTRY - don't auto-populate
-                vendorName,
-                itemName: it.itemName || it.model || '',
-                itemCode: it.itemCode || '',
-                qtyReceived: 0,
-                okQty: 0,
-                reworkQty: 0,
-                rejectQty: 0,
-                grnNo: '',
-                remarks: '',
-              });
-              added = true;
-            }
-          });
-        });
-        if (added) {
-          setRecords(cur);
-          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cur));
-        }
-      }
-    } catch {}
-    
-    // Mark initialization complete
     setIsInitialized(true);
-    }, []);
+  }, []);
 
     // Subscribe to Firestore and load master data when authenticated
     useEffect(() => {
@@ -274,20 +194,12 @@ const VSIRModule: React.FC = () => {
     };
   }, [isInitialized]);
 
-  // Persist records (but skip on initial mount)
+  // Persist records and dispatch events
   useEffect(() => {
     if (!isInitialized) {
-      console.log('[VSIR-DEBUG] Skipping persist - not yet initialized');
       return;
     }
-    const stackTrace = new Error().stack;
-    console.log('[VSIR-DEBUG] Records changed - persisting (local fallback when logged out):', records.map(r => ({ id: r.id, po: r.poNo, vendorBatchNo: r.vendorBatchNo })));
-    console.log('[VSIR-DEBUG] Stack:', stackTrace);
-    if (!userUid) {
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(records));
-    } else {
-      console.log('[VSIR-DEBUG] user logged in - VSIR persistence handled by Firestore subscriptions and explicit writes');
-    }
+    console.log('[VSIR-DEBUG] Records changed - VSIR persistence handled by Firestore subscriptions and explicit writes');
     try {
       bus.dispatchEvent(new CustomEvent('vsir.updated', { detail: { records } }));
     } catch (err) {
@@ -300,7 +212,7 @@ const VSIRModule: React.FC = () => {
     const syncVendorBatchFromDept = () => {
       try {
         console.log('[VSIR-DEBUG] ========== SYNC CHECK ==========');
-        const vendorDepts = (userUid && Array.isArray(vendorDeptOrders) && vendorDeptOrders.length) ? vendorDeptOrders : (localStorage.getItem('vendorDeptData') ? JSON.parse(localStorage.getItem('vendorDeptData') as string) : []);
+        const vendorDepts = vendorDeptOrders || [];
         if (!vendorDepts || vendorDepts.length === 0) {
           console.log('[VSIR-DEBUG] No vendorDeptData found for sync');
           return;
@@ -340,7 +252,6 @@ const VSIRModule: React.FC = () => {
           console.log('[VSIR-DEBUG] ✓ Records updated, persisting');
           console.log('[VSIR-DEBUG] Updated records:', updatedRecords.map(r => ({ poNo: r.poNo, vendorBatchNo: r.vendorBatchNo, invoiceDcNo: r.invoiceDcNo })));
           setRecords(updatedRecords);
-          if (!userUid) localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedRecords));
         } else {
           console.log('[VSIR-DEBUG] No records needed updating');
         }
@@ -370,7 +281,7 @@ const VSIRModule: React.FC = () => {
     }
 
     try {
-      const psirs = (userUid && Array.isArray(psirData) && psirData.length) ? psirData : (localStorage.getItem('psirData') ? JSON.parse(localStorage.getItem('psirData') as string) : []);
+      const psirs = psirData || [];
       if (!Array.isArray(psirs) || psirs.length === 0) {
         console.log('[VSIR] No PSIR data found for indent auto-fill');
         return;
@@ -394,7 +305,7 @@ const VSIRModule: React.FC = () => {
   // Auto-import from purchaseData (run once)
   useEffect(() => {
     try {
-      const purchaseDataList = (userUid && Array.isArray(purchaseData) && purchaseData.length) ? purchaseData : (localStorage.getItem('purchaseData') ? JSON.parse(localStorage.getItem('purchaseData') as string) : []);
+      const purchaseDataList = purchaseData || [];
       const existingPOs = new Set(records.map(r => r.poNo));
       console.log('[VSIR-DEBUG] Auto-import from purchaseData starting. Current records:', records.length);
       let newRecords = [...records];
@@ -408,18 +319,6 @@ const VSIRModule: React.FC = () => {
         if (vendorDeptMatch) {
           oaNo = vendorDeptMatch.oaNo || '';
           batchNo = vendorDeptMatch.batchNo || '';
-        } else {
-          try {
-            const psirRaw = localStorage.getItem('psirData');
-            if (psirRaw) {
-              const psirs = JSON.parse(psirRaw);
-              const psirMatch = Array.isArray(psirs) && psirs.find((p: any) => p.poNo === order.poNo);
-              if (psirMatch) {
-                oaNo = psirMatch.oaNo || oaNo;
-                batchNo = psirMatch.batchNo || batchNo;
-              }
-            }
-          } catch {}
         }
 
         order.items.forEach((item: any) => {
@@ -450,73 +349,9 @@ const VSIRModule: React.FC = () => {
       if (added) {
         console.log('[VSIR-DEBUG] Auto-import: added records, new total:', newRecords.length);
         setRecords(newRecords);
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(newRecords));
       }
     } catch {}
     // eslint-disable-next-line
-  }, []);
-
-  // Sync on vendorIssueData storage change
-  useEffect(() => {
-    const syncVendorIssue = () => {
-      try {
-        const vendorIssuesList = (userUid && Array.isArray(vendorIssues) && vendorIssues.length) ? vendorIssues : (localStorage.getItem('vendorIssueData') ? JSON.parse(localStorage.getItem('vendorIssueData') as string) : []);
-        if (!vendorIssuesList || vendorIssuesList.length === 0) {
-          console.log('[VSIR-DEBUG] No vendorIssueData to sync');
-          return;
-        }
-        let cur = (Array.isArray(records) && records.length) ? [...records] : (JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '[]') as VSRIRecord[]);
-        console.log('[VSIR-DEBUG] syncVendorIssue: loaded', cur.length, 'records from state/storage');
-        let added = false;
-        vendorIssuesList.forEach((issue: any) => {
-          if (!issue?.items) return;
-          issue.items.forEach((it: any) => {
-            const exists = cur.some(
-              r =>
-                (r.poNo || '').toString().trim() === (issue.materialPurchasePoNo || '').toString().trim() &&
-                (r.itemCode || '').toString().trim() === (it.itemCode || '').toString().trim()
-            );
-            if (!exists) {
-              console.log('[VSIR-DEBUG] Adding new record from vendorIssue:', issue.materialPurchasePoNo, it.itemCode);
-              cur.push({
-                id: Date.now() + Math.floor(Math.random() * 10000),
-                receivedDate: issue.date || '',
-                indentNo: '',
-                poNo: issue.materialPurchasePoNo || '',
-                oaNo: issue.oaNo || '',
-                purchaseBatchNo: issue.batchNo || '',
-                vendorBatchNo: '',
-                dcNo: '', // MANUAL ENTRY - don't auto-populate
-                invoiceDcNo: '', // MANUAL ENTRY - don't auto-populate
-                vendorName: issue.vendorName || '',
-                itemName: it.itemName || it.model || '',
-                itemCode: it.itemCode || '',
-                qtyReceived: 0,
-                okQty: 0,
-                reworkQty: 0,
-                rejectQty: 0,
-                grnNo: '',
-                remarks: '',
-              });
-              added = true;
-            }
-          });
-        });
-        if (added) {
-          console.log('[VSIR-DEBUG] syncVendorIssue: added records, calling setRecords with', cur.length, 'total records');
-          setRecords(cur);
-          if (!userUid) localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cur));
-        }
-      } catch {}
-    };
-
-    const handler = (e: StorageEvent) => e.key === 'vendorIssueData' && syncVendorIssue();
-    window.addEventListener('storage', handler);
-    const interval = setInterval(syncVendorIssue, 1500);
-    return () => {
-      window.removeEventListener('storage', handler);
-      clearInterval(interval);
-    };
   }, []);
 
   // Fill missing OA/Batch from PSIR/VendorDept (once)
@@ -527,9 +362,9 @@ const VSIRModule: React.FC = () => {
     }
     try {
       console.log('[VSIR-DEBUG] Fill missing effect: processing', records.length, 'records');
-      const psirs = (userUid && Array.isArray(psirData) && psirData.length) ? psirData : JSON.parse(localStorage.getItem('psirData') || '[]');
-      const vendorDepts = (userUid && Array.isArray(vendorDeptOrders) && vendorDeptOrders.length) ? vendorDeptOrders : JSON.parse(localStorage.getItem('vendorDeptData') || '[]');
-      const vendorIssuesList = (userUid && Array.isArray(vendorIssues) && vendorIssues.length) ? vendorIssues : JSON.parse(localStorage.getItem('vendorIssueData') || '[]');
+      const psirs = psirData || [];
+      const vendorDepts = vendorDeptOrders || [];
+      const vendorIssuesList = vendorIssues || [];
 
       let updated = false;
       const updatedRecords = records.map(record => {
@@ -572,7 +407,6 @@ const VSIRModule: React.FC = () => {
         if (updated) {
         console.log('[VSIR-DEBUG] Fill missing: updated records, calling setRecords');
         setRecords(updatedRecords);
-        if (!userUid) localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedRecords));
       } else {
         console.log('[VSIR-DEBUG] Fill missing: no updates needed');
       }
@@ -587,41 +421,35 @@ const VSIRModule: React.FC = () => {
 
     let oaNo = '';
     let batchNo = '';
-    // dcNo is now MANUAL ENTRY - don't auto-populate
     let vendorName = '';
 
     // From VendorDept
-    const deptMatch = vendorDeptOrders.find((v: any) => v.materialPurchasePoNo === itemInput.poNo);
+    const deptMatch = (vendorDeptOrders || []).find((v: any) => v.materialPurchasePoNo === itemInput.poNo);
     if (deptMatch) {
       oaNo = deptMatch.oaNo || '';
       batchNo = deptMatch.batchNo || '';
-      // dcNo is MANUAL ENTRY - skip auto-population
       vendorName = deptMatch.vendorName || '';
     }
 
-    // Fallback to PSIR (prefer Firestore-loaded psirData)
+    // Fallback to PSIR
     if ((!oaNo || !batchNo) && itemInput.poNo) {
-      try {
-        const psirs = (userUid && Array.isArray(psirData) && psirData.length) ? psirData : (localStorage.getItem('psirData') ? JSON.parse(localStorage.getItem('psirData') as string) : []);
-        const psirMatch = Array.isArray(psirs) && psirs.find((p: any) => p.poNo === itemInput.poNo);
-        if (psirMatch) {
-          oaNo = oaNo || psirMatch.oaNo || '';
-          batchNo = batchNo || psirMatch.batchNo || '';
-        }
-      } catch {}
+      const psirs = psirData || [];
+      const psirMatch = Array.isArray(psirs) && psirs.find((p: any) => p.poNo === itemInput.poNo);
+      if (psirMatch) {
+        oaNo = oaNo || psirMatch.oaNo || '';
+        batchNo = batchNo || psirMatch.batchNo || '';
+      }
     }
 
-    // Fallback to VendorIssue (prefer Firestore-loaded vendorIssues)
+    // Fallback to VendorIssue
     if ((!oaNo || !batchNo || !vendorName) && itemInput.poNo) {
-      try {
-        const issues = (userUid && Array.isArray(vendorIssues) && vendorIssues.length) ? vendorIssues : (localStorage.getItem('vendorIssueData') ? JSON.parse(localStorage.getItem('vendorIssueData') as string) : []);
-        const issueMatch = Array.isArray(issues) && issues.find((vi: any) => vi.materialPurchasePoNo === itemInput.poNo);
-        if (issueMatch) {
-          oaNo = oaNo || issueMatch.oaNo || '';
-          batchNo = batchNo || issueMatch.batchNo || '';
-          vendorName = vendorName || issueMatch.vendorName || '';
-        }
-      } catch {}
+      const issues = vendorIssues || [];
+      const issueMatch = Array.isArray(issues) && issues.find((vi: any) => vi.materialPurchasePoNo === itemInput.poNo);
+      if (issueMatch) {
+        oaNo = oaNo || issueMatch.oaNo || '';
+        batchNo = batchNo || issueMatch.batchNo || '';
+        vendorName = vendorName || issueMatch.vendorName || '';
+      }
     }
 
     setItemInput(prev => ({
@@ -637,7 +465,7 @@ const VSIRModule: React.FC = () => {
   useEffect(() => {
     if (!itemInput.itemCode) return;
     try {
-      const issues = (userUid && Array.isArray(vendorIssues) && vendorIssues.length) ? vendorIssues : (localStorage.getItem('vendorIssueData') ? JSON.parse(localStorage.getItem('vendorIssueData') as string) : []);
+      const issues = vendorIssues || [];
       if (!issues || !issues.length) return;
       let source: any = null;
 
@@ -684,39 +512,17 @@ const VSIRModule: React.FC = () => {
     let maxNum = 0;
 
     try {
-      // Check VSIR records (prefer in-memory records when logged in)
-      if (userUid) {
-        (records || []).forEach(r => {
-          const match = (r as any).vendorBatchNo?.match?.(new RegExp(`${yy}/V(\\d+)`));
-          if (match) maxNum = Math.max(maxNum, parseInt(match[1], 10));
-        });
-      } else {
-        const vsirRaw = localStorage.getItem(LOCAL_STORAGE_KEY);
-        if (vsirRaw) {
-          const localRecords = JSON.parse(vsirRaw) as VSRIRecord[];
-          localRecords.forEach(r => {
-            const match = (r as any).vendorBatchNo?.match?.(new RegExp(`${yy}/V(\\d+)`));
-            if (match) maxNum = Math.max(maxNum, parseInt(match[1], 10));
-          });
-        }
-      }
+      // Check VSIR records
+      (records || []).forEach(r => {
+        const match = (r as any).vendorBatchNo?.match?.(new RegExp(`${yy}/V(\\d+)`));
+        if (match) maxNum = Math.max(maxNum, parseInt(match[1], 10));
+      });
 
-      // Check VendorDept (prefer vendorDeptOrders state when available)
-      if (userUid && Array.isArray(vendorDeptOrders) && vendorDeptOrders.length) {
-        vendorDeptOrders.forEach((d: any) => {
-          const match = d.vendorBatchNo?.match?.(new RegExp(`${yy}/V(\\d+)`));
-          if (match) maxNum = Math.max(maxNum, parseInt(match[1], 10));
-        });
-      } else {
-        const deptRaw = localStorage.getItem('vendorDeptData');
-        if (deptRaw) {
-          const depts = JSON.parse(deptRaw);
-          depts.forEach((d: any) => {
-            const match = d.vendorBatchNo?.match?.(new RegExp(`${yy}/V(\\d+)`));
-            if (match) maxNum = Math.max(maxNum, parseInt(match[1], 10));
-          });
-        }
-      }
+      // Check VendorDept
+      (vendorDeptOrders || []).forEach((d: any) => {
+        const match = d.vendorBatchNo?.match?.(new RegExp(`${yy}/V(\\d+)`));
+        if (match) maxNum = Math.max(maxNum, parseInt(match[1], 10));
+      });
     } catch (e) {
       console.error('[VSIR] Error in generateVendorBatchNo:', e);
     }
@@ -729,32 +535,14 @@ const VSIRModule: React.FC = () => {
 
     // Try VendorDept
     try {
-      if (userUid && Array.isArray(vendorDeptOrders) && vendorDeptOrders.length) {
-        const match = vendorDeptOrders.find((d: any) => d.materialPurchasePoNo === poNo);
-        if (match?.vendorBatchNo) return match.vendorBatchNo;
-      } else {
-        const deptRaw = localStorage.getItem('vendorDeptData');
-        if (deptRaw) {
-          const depts = JSON.parse(deptRaw);
-          const match = depts.find((d: any) => d.materialPurchasePoNo === poNo);
-          if (match?.vendorBatchNo) return match.vendorBatchNo;
-        }
-      }
+      const match = (vendorDeptOrders || []).find((d: any) => d.materialPurchasePoNo === poNo);
+      if (match?.vendorBatchNo) return match.vendorBatchNo;
     } catch {}
 
     // Try VendorIssue
     try {
-      if (userUid && Array.isArray(vendorIssues) && vendorIssues.length) {
-        const match = vendorIssues.find((i: any) => i.materialPurchasePoNo === poNo);
-        if (match?.vendorBatchNo) return match.vendorBatchNo;
-      } else {
-        const issueRaw = localStorage.getItem('vendorIssueData');
-        if (issueRaw) {
-          const issues = JSON.parse(issueRaw);
-          const match = issues.find((i: any) => i.materialPurchasePoNo === poNo);
-          if (match?.vendorBatchNo) return match.vendorBatchNo;
-        }
-      }
+      const match = (vendorIssues || []).find((i: any) => i.materialPurchasePoNo === poNo);
+      if (match?.vendorBatchNo) return match.vendorBatchNo;
     } catch {}
 
     return ''; // not found
@@ -819,10 +607,8 @@ const VSIRModule: React.FC = () => {
       setRecords(updated);
     }
 
-    // Persist to localStorage only when not logged in. Persist to Firestore when logged in.
-    if (!userUid) {
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
-    } else {
+    // Persist to Firestore when logged in
+    if (userUid) {
       try {
         if (editIdx !== null) {
           const existing = records[editIdx];
@@ -951,7 +737,6 @@ const VSIRModule: React.FC = () => {
                   }
                   if (field.key === 'vendorBatchNo') {
                     const vendorBatchNo = rec.vendorBatchNo || getVendorBatchNoForPO(rec.poNo) || '';
-                    console.log(`[VSIR-DEBUG] Rendering vendorBatchNo for rec ${rec.id} (PO: ${rec.poNo}): stored="${rec.vendorBatchNo}" final="${vendorBatchNo}"`);
                     return <td key={field.key} style={{ border: '1px solid #eee', padding: 8 }}>{vendorBatchNo}</td>;
                   }
                   return <td key={field.key} style={{ border: '1px solid #eee', padding: 8 }}>{(rec as any)[field.key]}</td>;
@@ -974,13 +759,9 @@ const VSIRModule: React.FC = () => {
                 <td style={{ border: '1px solid #eee', padding: 8 }}>
                   <button
                     onClick={async () => {
-                      // delete locally and in Firestore if logged in
+                      // delete from state and Firestore if logged in
                       const toDelete = records[idx];
-                      setRecords(prev => {
-                        const updated = prev.filter((_, i) => i !== idx);
-                        if (!userUid) localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
-                        return updated;
-                      });
+                      setRecords(prev => prev.filter((_, i) => i !== idx));
                       if (userUid && toDelete && typeof toDelete.id === 'string') {
                         try { await deleteVSIRRecord(userUid, toDelete.id as string); } catch (e) { console.error('[VSIR] deleteVSIRRecord failed', e); }
                       }

@@ -1,8 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import bus from '../utils/eventBus';
-import { onAuthStateChanged } from 'firebase/auth';
-import { auth } from '../firebase';
-import { subscribeVendorDepts, addVendorDept, updateVendorDept } from '../utils/firestoreServices';
 
 interface VendorDeptItem {
 	itemName: string;
@@ -86,16 +83,15 @@ const chooseBestStock = (candidates: any[]) => {
 };
 
 // Helper: get PO qty (purchaseQty / qty / originalIndentQty) from purchaseOrders or purchaseData
-const getPurchaseQty = (poNo: string | undefined, itemCode: string | undefined): number => {
+const getPurchaseQty = (poNo: string | undefined, itemCode: string | undefined, purchaseOrders?: any[], purchaseData?: any[]): number => {
 	try {
 		if (!poNo || !itemCode) return 0;
 		const norm = (v: any) => (v === undefined || v === null) ? '' : String(v).trim().toUpperCase();
 		const tPo = norm(poNo);
 		const tCode = norm(itemCode);
 
-		const purchaseOrdersRaw = localStorage.getItem('purchaseOrders');
-		if (purchaseOrdersRaw) {
-			const pos = JSON.parse(purchaseOrdersRaw);
+		if (purchaseOrders && Array.isArray(purchaseOrders)) {
+			const pos = purchaseOrders;
 			if (Array.isArray(pos)) {
 				const po = pos.find((p: any) => norm(p.poNo) === tPo);
 				if (po) {
@@ -132,9 +128,8 @@ const getPurchaseQty = (poNo: string | undefined, itemCode: string | undefined):
 			}
 		}
 
-		const purchaseDataRaw = localStorage.getItem('purchaseData');
-		if (purchaseDataRaw) {
-			const pd = JSON.parse(purchaseDataRaw);
+		if (purchaseData && Array.isArray(purchaseData)) {
+			const pd = purchaseData;
 			if (Array.isArray(pd)) {
 				const match = pd.find((it: any) => (norm(it.poNo) === tPo || norm(it.indentNo) === tPo) && norm(it.itemCode || it.Code) === tCode);
 				if (match) {
@@ -154,7 +149,7 @@ const getPurchaseQty = (poNo: string | undefined, itemCode: string | undefined):
 };
 
 // Prefer Purchase module's status when available (search purchaseData / purchaseOrders)
-const getIndentStatusFromPurchase = (poNo: any, itemCode: any, indentNo: any): string => {
+const getIndentStatusFromPurchase = (poNo: any, itemCode: any, indentNo: any, purchaseData?: any[], purchaseOrders?: any[]): string => {
 	try {
 		const norm = (v: any) => (v === undefined || v === null) ? '' : String(v).trim().toUpperCase();
 		const tPo = norm(poNo);
@@ -162,9 +157,8 @@ const getIndentStatusFromPurchase = (poNo: any, itemCode: any, indentNo: any): s
 		const tIndent = norm(indentNo);
 
 		// Check purchaseData first
-		const purchaseDataRaw = localStorage.getItem('purchaseData');
-		if (purchaseDataRaw) {
-			const pd = JSON.parse(purchaseDataRaw);
+		if (purchaseData && Array.isArray(purchaseData)) {
+			const pd = purchaseData;
 			if (Array.isArray(pd)) {
 				const found = pd.find((it: any) => (
 					((norm(it.poNo) === tPo) || (norm(it.indentNo) === tIndent)) && (norm(it.itemCode || it.Code) === tCode)
@@ -174,9 +168,8 @@ const getIndentStatusFromPurchase = (poNo: any, itemCode: any, indentNo: any): s
 		}
 
 		// Then check purchaseOrders (PO -> items)
-		const purchaseOrdersRaw = localStorage.getItem('purchaseOrders');
-		if (purchaseOrdersRaw) {
-			const pos = JSON.parse(purchaseOrdersRaw);
+		if (purchaseOrders && Array.isArray(purchaseOrders)) {
+			const pos = purchaseOrders;
 			if (Array.isArray(pos)) {
 				const po = pos.find((p: any) => norm(p.poNo) === tPo || norm(p.poNo || p.indentNo) === tPo);
 				if (po) {
@@ -197,15 +190,13 @@ const getIndentStatusFromPurchase = (poNo: any, itemCode: any, indentNo: any): s
 };
 
 // Helper: Get supplier name from Purchase module by PO No
-const getSupplierNameFromPO = (poNo: any): string => {
+const getSupplierNameFromPO = (poNo: any, purchaseOrders?: any[], purchaseData?: any[]): string => {
 	try {
 		if (!poNo) return '';
 		const poNoNormalized = String(poNo).trim().toUpperCase();
 		
 		// Check Purchase Orders first
-		const purchaseOrdersRaw = localStorage.getItem('purchaseOrders');
-		if (purchaseOrdersRaw) {
-			const purchaseOrders = JSON.parse(purchaseOrdersRaw);
+		if (purchaseOrders && Array.isArray(purchaseOrders)) {
 			if (Array.isArray(purchaseOrders)) {
 				const po = purchaseOrders.find((p: any) => String(p.poNo || '').trim().toUpperCase() === poNoNormalized);
 				if (po && po.supplierName) {
@@ -215,9 +206,7 @@ const getSupplierNameFromPO = (poNo: any): string => {
 		}
 		
 		// Fall back to Purchase Data
-		const purchaseDataRaw = localStorage.getItem('purchaseData');
-		if (purchaseDataRaw) {
-			const purchaseData = JSON.parse(purchaseDataRaw);
+		if (purchaseData && Array.isArray(purchaseData)) {
 			if (Array.isArray(purchaseData)) {
 				const entry = purchaseData.find((p: any) => String(p.poNo || '').trim().toUpperCase() === poNoNormalized);
 				if (entry && entry.supplierName) {
@@ -234,7 +223,7 @@ const getSupplierNameFromPO = (poNo: any): string => {
 };
 
 // Helper: Get vendorBatchNo from VSIR module if available
-const getVendorBatchNoFromVSIR = (poNo: any): string => {
+const getVendorBatchNoFromVSIR = (poNo: any, vsirRecords?: any[]): string => {
 	try {
 		if (!poNo) {
 			console.log('[VendorDept] getVendorBatchNoFromVSIR called with empty poNo');
@@ -243,16 +232,15 @@ const getVendorBatchNoFromVSIR = (poNo: any): string => {
 		const poNoNormalized = String(poNo).trim();
 		console.log('[VendorDept] Looking for vendorBatchNo for PO:', poNoNormalized);
 		
-		const vsirRaw = localStorage.getItem('vsri-records');
-		console.log('[VendorDept] VSIR data exists:', !!vsirRaw);
-		if (!vsirRaw) {
-			console.log('[VendorDept] No VSIR data found in localStorage');
+		console.log('[VendorDept] VSIR data exists:', !!vsirRecords);
+		if (!vsirRecords) {
+			console.log('[VendorDept] No VSIR data found');
 			return '';
 		}
-		const vsirRecords = JSON.parse(vsirRaw);
+		// vsirRecords is already an array
 		if (!Array.isArray(vsirRecords)) {
 			console.log('[VendorDept] VSIR data is not an array');
-			return '';
+			// Try to handle as array anyway
 		}
 		
 		console.log('[VendorDept] VSIR records count:', vsirRecords.length);
@@ -283,14 +271,12 @@ const getVendorBatchNoFromVSIR = (poNo: any): string => {
 };
 
 // Helper: Get PSIR data for a given PO
-const getPSIRDataByPO = (poNo: string | undefined): any => {
+const getPSIRDataByPO = (poNo: string | undefined, psirData?: any[]): any => {
 	try {
 		if (!poNo) return null;
-		const psirRaw = localStorage.getItem('psirData');
-		if (!psirRaw) return null;
-		const psirRecords = JSON.parse(psirRaw);
-		if (!Array.isArray(psirRecords)) return null;
-		const match = psirRecords.find((r: any) => String(r.poNo || '').trim() === String(poNo).trim());
+		if (!psirData) return null;
+		if (!Array.isArray(psirData)) return null;
+		const match = psirData.find((r: any) => String(r.poNo || '').trim() === String(poNo).trim());
 		return match || null;
 	} catch (err) {
 		console.error('[VendorDept] Error getting PSIR data:', err);
@@ -312,36 +298,34 @@ const VendorDeptModule: React.FC = () => {
 		items: [],
 	});
 
-	// Get all PO numbers from PurchaseModule
+	// Accept Firestore state variables as props
+	const [purchaseOrders] = useState<any[]>([]);
+	const [purchaseData] = useState<any[]>([]);
+	const [vsirRecords] = useState<any[]>([]);
+	const [psirData] = useState<any[]>([]);
+
+	// Get all PO numbers from PurchaseModule state
 	const [purchasePOs, setPurchasePOs] = useState<string[]>([]);
 	useEffect(() => {
-		const purchaseOrdersRaw = localStorage.getItem('purchaseOrders');
-		if (purchaseOrdersRaw) {
-			try {
-				const parsed = JSON.parse(purchaseOrdersRaw);
-				if (Array.isArray(parsed)) {
-					const poList = parsed.map((order: any) => order.poNo).filter(Boolean);
-					setPurchasePOs(poList);
-					// Always auto-select latest if not set
-					if (poList.length > 0 && !newOrder.materialPurchasePoNo) {
-						setNewOrder(prev => ({ ...prev, materialPurchasePoNo: poList[poList.length - 1] }));
-					}
-				}
-			} catch {}
+		if (purchaseOrders && Array.isArray(purchaseOrders)) {
+			const poList = purchaseOrders.map((order: any) => order.poNo).filter(Boolean);
+			setPurchasePOs(poList);
+			// Always auto-select latest if not set
+			if (poList.length > 0 && !newOrder.materialPurchasePoNo) {
+				setNewOrder(prev => ({ ...prev, materialPurchasePoNo: poList[poList.length - 1] }));
+			}
 		}
-	}, [newOrder.materialPurchasePoNo]);
+	}, [newOrder.materialPurchasePoNo, purchaseOrders]);
 
 
-	const [orders, setOrders] = useState<VendorDeptOrder[]>(() => {
-		const saved = localStorage.getItem('vendorDeptData');
-		if (!saved) return [];
-		try {
-			const parsed = JSON.parse(saved);
-			return parsed.map((order: any) => {
-				// Ensure vendorBatchNo field exists - if missing, try to get from VSIR
+	const [orders, setOrders] = useState<VendorDeptOrder[]>([]);
+	useEffect(() => {
+		// Update orders when vsirRecords changes
+		if (orders.length > 0) {
+			const updated = orders.map((order: any) => {
 				let vendorBatchNo = order.vendorBatchNo || '';
 				if (!vendorBatchNo) {
-					vendorBatchNo = getVendorBatchNoFromVSIR(order.materialPurchasePoNo);
+					vendorBatchNo = getVendorBatchNoFromVSIR(order.materialPurchasePoNo, vsirRecords);
 				}
 				return {
 					...order,
@@ -349,86 +333,38 @@ const VendorDeptModule: React.FC = () => {
 					items: Array.isArray(order.items) ? order.items : [],
 				};
 			});
-		} catch {
-			return [];
+			setOrders(updated);
 		}
-	});
-
-	const [userUid, setUserUid] = useState<string | null>(null);
-
-	// Persist helper: writes to Firestore when logged in, otherwise localStorage
-	const persistVendorDepts = async (updatedOrders: VendorDeptOrder[]) => {
-		setOrders(updatedOrders.map(o => ({ ...o })));
-		if (!userUid) {
-			try { localStorage.setItem('vendorDeptData', JSON.stringify(updatedOrders)); } catch {}
-			return;
-		}
-		for (const order of updatedOrders) {
-			try {
-				if (order && (order as any).id && typeof (order as any).id === 'string') {
-					await updateVendorDept(userUid, (order as any).id as string, order);
-				} else {
-					await addVendorDept(userUid, order);
-				}
-			} catch (e) {
-				console.error('[VendorDept] Error persisting vendorDept to Firestore:', e);
-			}
-		}
-	};
+	}, [vsirRecords]);
 
 	// Sync vendorBatchNo from VSIR on component mount
 	useEffect(() => {
 		console.log('[VendorDept] Syncing vendorBatchNo from VSIR on mount for all existing orders');
 		setOrders(prevOrders => {
-			let updated = false;
 			const syncedOrders = prevOrders.map(order => {
 				if (!order.vendorBatchNo || !order.vendorBatchNo.trim()) {
-					const vendorBatchNo = getVendorBatchNoFromVSIR(order.materialPurchasePoNo);
+					const vendorBatchNo = getVendorBatchNoFromVSIR(order.materialPurchasePoNo, vsirRecords);
 					if (vendorBatchNo && vendorBatchNo !== order.vendorBatchNo) {
 						console.log(`[VendorDept] ✓ Synced vendorBatchNo for PO ${order.materialPurchasePoNo}: ${vendorBatchNo}`);
-						updated = true;
 						return { ...order, vendorBatchNo };
 					}
 				}
 				return order;
 			});
 			
-			if (updated) {
-				console.log('[VendorDept] Persisting synced orders to storage');
-				persistVendorDepts(syncedOrders);
-			}
-			
 			return syncedOrders;
 		});
-	}, []); // Run once on mount
-
-	// Subscribe to Firestore vendorDepts when authenticated
-	useEffect(() => {
-		const unsubAuth = onAuthStateChanged(auth, (u) => {
-			const uid = u ? u.uid : null;
-			setUserUid(uid);
-			if (!uid) return;
-			const unsub = subscribeVendorDepts(uid, (docs) => {
-				try {
-					setOrders((docs || []).map((d: any) => ({ ...d, items: Array.isArray(d.items) ? d.items : [] })) as any[]);
-				} catch (e) { console.error('[VendorDept] subscribe mapping failed', e); }
-			});
-			return () => { try { unsub(); } catch {} };
-		});
-		return () => { try { unsubAuth(); } catch {} };
-	}, []);
+	}, [vsirRecords]); // Run when VSIR records change
 
 	// Clean up debitNoteOrQtyReturned field that may have been incorrectly set to GRN data
 	useEffect(() => {
 		console.log('[VendorDept] Cleaning up debitNoteOrQtyReturned field with GRN-like values');
 		setOrders(prevOrders => {
-			let updated = false;
 			const cleanedOrders = prevOrders.map(order => {
 				const cleanedItems = order.items.map(item => {
 					// If debitNoteOrQtyReturned looks like a GRN number (only digits, longer than 3), clear it
 					if (item.debitNoteOrQtyReturned && /^\d{4,}$/.test(String(item.debitNoteOrQtyReturned).trim())) {
 						console.log(`[VendorDept] ✓ Cleared GRN-like value from debitNoteOrQtyReturned for item ${item.itemCode}: "${item.debitNoteOrQtyReturned}"`);
-						updated = true;
 						return { ...item, debitNoteOrQtyReturned: '' };
 					}
 					return item;
@@ -439,11 +375,6 @@ const VendorDeptModule: React.FC = () => {
 				}
 				return order;
 			});
-			
-			if (updated) {
-				console.log('[VendorDept] Persisting cleaned orders to storage');
-				persistVendorDepts(cleanedOrders);
-			}
 			
 			return cleanedOrders;
 		});
@@ -470,13 +401,11 @@ const VendorDeptModule: React.FC = () => {
 		if (!newOrder.materialPurchasePoNo || !itemInput.itemCode) return;
 		
 		try {
-			const vsirRaw = localStorage.getItem('vsri-records');
-			if (!vsirRaw) {
+			if (!vsirRecords) {
 				console.debug('[VendorDeptModule][AutoFill] No VSIR records found');
 				return;
 			}
 			
-			const vsirRecords = JSON.parse(vsirRaw);
 			if (!Array.isArray(vsirRecords)) return;
 			
 			// Find matching VSIR record for this PO and item
@@ -519,12 +448,12 @@ const VendorDeptModule: React.FC = () => {
 		if (!newOrder.materialPurchasePoNo || newOrder.items.length > 0) return;
 		
 		try {
-			const psirData = getPSIRDataByPO(newOrder.materialPurchasePoNo);
-			if (psirData && psirData.items && Array.isArray(psirData.items)) {
-				console.log('[VendorDeptModule][AutoPopulate] Found', psirData.items.length, 'items in PSIR for PO:', newOrder.materialPurchasePoNo);
+			const psirRecord = getPSIRDataByPO(newOrder.materialPurchasePoNo, psirData);
+			if (psirRecord && psirRecord.items && Array.isArray(psirRecord.items)) {
+				console.log('[VendorDeptModule][AutoPopulate] Found', psirRecord.items.length, 'items in PSIR for PO:', newOrder.materialPurchasePoNo);
 				
 				// Auto-populate items from PSIR
-				const psirItems = psirData.items.map((item: any) => ({
+				const psirItems = psirRecord.items.map((item: any) => ({
 					itemName: item.itemName || '',
 					itemCode: item.itemCode || '',
 					materialIssueNo: '', // Will be filled by user
@@ -553,10 +482,7 @@ const VendorDeptModule: React.FC = () => {
 		if (orders.length === 0) return;
 		
 		try {
-			const vsirRaw = localStorage.getItem('vsri-records');
-			if (!vsirRaw) return;
-			
-			const vsirRecords = JSON.parse(vsirRaw);
+			if (!vsirRecords) return;
 			if (!Array.isArray(vsirRecords)) return;
 			
 			let updated = false;
@@ -602,7 +528,6 @@ const VendorDeptModule: React.FC = () => {
 			if (updated) {
 				console.debug('[VendorDeptModule][Sync] Syncing VSIR data to vendor dept orders');
 				setOrders(updatedOrders);
-				localStorage.setItem('vendorDeptData', JSON.stringify(updatedOrders));
 				bus.dispatchEvent(new CustomEvent('vendorDept.updated', { detail: { source: 'vsir-sync' } }));
 			}
 		} catch (e) {
@@ -635,45 +560,33 @@ const VendorDeptModule: React.FC = () => {
 		};
 	}, []);
 
-	// Debug: Log VSIR records on component mount
+	// Debug: Log VSIR records and orders on component mount
 	useEffect(() => {
-		const vsirRaw = localStorage.getItem('vsri-records');
-		const vendorDeptRaw = localStorage.getItem('vendorDeptData');
 		console.log('[VendorDeptModule] ========== MOUNT DIAGNOSTIC ==========');
-		console.log('[VendorDeptModule] VSIR records from localStorage:');
-		if (vsirRaw) {
+		console.log('[VendorDeptModule] VSIR records:');
+		if (vsirRecords) {
 			try {
-				const vsir = JSON.parse(vsirRaw);
-				console.log('[VendorDeptModule]   Count:', vsir.length);
-				console.log('[VendorDeptModule]   Full data:', JSON.stringify(vsir, null, 2));
-				vsir.forEach((r: any, i: number) => {
+				console.log('[VendorDeptModule]   Count:', vsirRecords.length);
+				console.log('[VendorDeptModule]   Full data:', JSON.stringify(vsirRecords, null, 2));
+				vsirRecords.forEach((r: any, i: number) => {
 					console.log(`[VendorDeptModule]   [${i}] poNo="${r.poNo}" vendorBatchNo="${r.vendorBatchNo}" itemCode="${r.itemCode}"`);
 				});
 			} catch (e) {
-				console.log('[VendorDeptModule]   Error parsing VSIR:', e);
+				console.log('[VendorDeptModule]   Error:', e);
 			}
 		} else {
 			console.log('[VendorDeptModule]   No VSIR records found');
 		}
-		console.log('[VendorDeptModule] VendorDept orders from localStorage:');
-		if (vendorDeptRaw) {
-			try {
-				const vd = JSON.parse(vendorDeptRaw);
-				console.log('[VendorDeptModule]   Count:', vd.length);
-				vd.forEach((o: any, i: number) => {
-					console.log(`[VendorDeptModule]   [${i}] materialPurchasePoNo="${o.materialPurchasePoNo}" vendorBatchNo="${o.vendorBatchNo}"`);
-				});
-			} catch (e) {
-				console.log('[VendorDeptModule]   Error parsing VendorDept:', e);
-			}
-		} else {
-			console.log('[VendorDeptModule]   No VendorDept records found');
-		}
+		console.log('[VendorDeptModule] VendorDept orders:');
+		console.log('[VendorDeptModule]   Count:', orders.length);
+		orders.forEach((o: any, i: number) => {
+			console.log(`[VendorDeptModule]   [${i}] materialPurchasePoNo="${o.materialPurchasePoNo}" vendorBatchNo="${o.vendorBatchNo}"`);
+		});
 		console.log('[VendorDeptModule] ======================================');
 	}, []);
 
-	const [itemNames, setItemNames] = useState<string[]>([]);
-	const [itemMaster, setItemMaster] = useState<{ itemName: string; itemCode: string }[]>([]);
+	const [itemNames] = useState<string[]>([]);
+	const [itemMaster] = useState<{ itemName: string; itemCode: string }[]>([]);
 	const [editIdx, setEditIdx] = useState<{orderIdx: number, itemIdx: number} | null>(null);
 
 	// Debug panel state
@@ -682,22 +595,13 @@ const VendorDeptModule: React.FC = () => {
 
 // Refresh closingStock values for all orders from stock records
 const refreshOrdersClosingStock = () => {
-	const raw = localStorage.getItem('vendorDeptData');
-	if (!raw) return;
-	try {
-		const parsed = JSON.parse(raw) as VendorDeptOrder[];
-		const updated = parsed.map(order => ({
-			...order,
-			items: (order.items || []).map((it: any) => ({
-				...it,
-				closingStock: getClosingStock(it.itemCode, it.itemName),
-			}))
-		}));
-		localStorage.setItem('vendorDeptData', JSON.stringify(updated));
-		setOrders(updated);
-	} catch (err) {
-		console.error('[VendorDeptModule] refreshOrdersClosingStock error', err);
-	}
+	setOrders(prevOrders => prevOrders.map(order => ({
+		...order,
+		items: (order.items || []).map((it: any) => ({
+			...it,
+			closingStock: getClosingStock(it.itemCode, it.itemName),
+		}))
+	})));
 };
 
 // Track stock updates so component re-renders when stock-records change
@@ -714,55 +618,33 @@ useEffect(() => {
 		};
 	}, []);
 
-	// Listen for VSIR updates to refresh vendorBatchNo display
-	const [, setVsirVersion] = useState(0);
+	// Update orders when VSIR records change
 	useEffect(() => {
-		const handleVsirUpdate = () => {
-			console.log('[VendorDept] VSIR updated, syncing vendorBatchNo to orders');
-			setOrders(prevOrders => {
-				const updated = prevOrders.map(order => {
-					// If vendorBatchNo is empty or missing, try to get from VSIR
-					if (!order.vendorBatchNo || !order.vendorBatchNo.trim()) {
-						const vsirBatchNo = getVendorBatchNoFromVSIR(order.materialPurchasePoNo);
-						if (vsirBatchNo) {
-							return { ...order, vendorBatchNo: vsirBatchNo };
-						}
-					}
-					return order;
-				});
-				
-				// Check if any order changed
-				const changed = updated.some((o, i) => o.vendorBatchNo !== prevOrders[i].vendorBatchNo);
-				if (changed) {
-					console.log('[VendorDept] Persisting updated orders with vendorBatchNo from VSIR');
-					localStorage.setItem('vendorDeptData', JSON.stringify(updated));
-				}
-				
-				return updated;
-			});
-			setVsirVersion(v => v + 1);
-		};
+		console.log('[VendorDept] VSIR records updated, syncing vendorBatchNo to orders');
+		if (orders.length === 0) return;
 		
-		bus.addEventListener('vsir.updated', handleVsirUpdate as EventListener);
-		const storageHandler = (e: StorageEvent) => { if ((e as any)?.key === 'vsri-records') handleVsirUpdate(); };
-		window.addEventListener('storage', storageHandler);
-		return () => {
-			bus.removeEventListener('vsir.updated', handleVsirUpdate as EventListener);
-			window.removeEventListener('storage', storageHandler as EventListener);
-		};
-	}, []);
+		setOrders(prevOrders => {
+			const updated = prevOrders.map(order => {
+				// If vendorBatchNo is empty or missing, try to get from VSIR
+				if (!order.vendorBatchNo || !order.vendorBatchNo.trim()) {
+					const vsirBatchNo = getVendorBatchNoFromVSIR(order.materialPurchasePoNo, vsirRecords);
+					if (vsirBatchNo) {
+						return { ...order, vendorBatchNo: vsirBatchNo };
+					}
+				}
+				return order;
+			});
+			
+			return updated;
+		});
+	}, [vsirRecords]);
 
-	// Auto-backfill batchNo from PSIR on mount for all existing orders
+	// Auto-backfill batchNo from PSIR when psirData changes
 	useEffect(() => {
+		if (!psirData || !Array.isArray(psirData) || orders.length === 0) return;
+		
 		console.log('[VendorDeptModule] Auto-backfilling batchNo from PSIR for existing orders...');
 		try {
-			const psirDataRaw = localStorage.getItem('psirData');
-			if (!psirDataRaw) {
-				console.log('[VendorDeptModule] No PSIR data found for backfill');
-				return;
-			}
-			
-			const psirRecords = JSON.parse(psirDataRaw);
 			setOrders(prevOrders => {
 				const updated = prevOrders.map(order => {
 					// If order already has batchNo, skip it
@@ -771,7 +653,7 @@ useEffect(() => {
 					}
 					
 					// Find matching PSIR record by PO number
-					const matchingPSIR = psirRecords.find((p: any) => p.poNo === order.materialPurchasePoNo);
+					const matchingPSIR = psirData.find((p: any) => p.poNo === order.materialPurchasePoNo);
 					if (matchingPSIR && matchingPSIR.batchNo && matchingPSIR.invoiceNo && String(matchingPSIR.invoiceNo).trim()) {
 						console.log('[VendorDeptModule] ✓ Auto-backfill: Found batchNo for PO', order.materialPurchasePoNo, ':', matchingPSIR.batchNo);
 						return { ...order, batchNo: matchingPSIR.batchNo };
@@ -779,113 +661,88 @@ useEffect(() => {
 					return order;
 				});
 				
-				// Check if any changes were made
-				const changed = updated.some((o, i) => o.batchNo !== prevOrders[i].batchNo);
-				if (changed) {
-					console.log('[VendorDeptModule] ✓ Auto-backfill completed - saving to localStorage');
-					localStorage.setItem('vendorDeptData', JSON.stringify(updated));
-					bus.dispatchEvent(new CustomEvent('vendorDept.updated', { detail: { vendorDeptData: updated } }));
-				}
 				return updated;
 			});
 		} catch (err) {
 			console.error('[VendorDeptModule] Error auto-backfilling batchNo:', err);
 		}
-	}, []);
+	}, [psirData]);
 
 	// Auto-fill vendorBatchNo in form when PO changes
 	useEffect(() => {
 		if (newOrder.materialPurchasePoNo && (!newOrder.vendorBatchNo || !newOrder.vendorBatchNo.trim())) {
-			const vsirBatchNo = getVendorBatchNoFromVSIR(newOrder.materialPurchasePoNo);
+			const vsirBatchNo = getVendorBatchNoFromVSIR(newOrder.materialPurchasePoNo, vsirRecords);
 			if (vsirBatchNo) {
 				console.log('[VendorDept] Auto-filling vendorBatchNo from VSIR:', vsirBatchNo);
 				setNewOrder(prev => ({ ...prev, vendorBatchNo: vsirBatchNo }));
 			}
 		}
-	}, [newOrder.materialPurchasePoNo]);
+	}, [newOrder.materialPurchasePoNo, vsirRecords]);
 
 		// Auto-fill Material Purchase PO No from latest PO No in PurchaseModule ONLY if newOrder is blank (prevents overwriting user input)
 		useEffect(() => {
 			const handlePurchaseChange = () => {
-				const purchaseOrdersRaw = localStorage.getItem('purchaseOrders');
-				if (purchaseOrdersRaw) {
-					try {
-						const parsed = JSON.parse(purchaseOrdersRaw);
-						if (Array.isArray(parsed) && parsed.length > 0) {
-							const latest = parsed[parsed.length - 1];
-							// Only auto-fill if newOrder is blank except for materialPurchasePoNo
-							if (
-								latest && latest.poNo &&
-								!newOrder.orderPlaceDate &&
-								!newOrder.dcNo &&
-								!newOrder.vendorName &&
-								(!newOrder.items || newOrder.items.length === 0)
-							) {
-								setNewOrder(prev => ({ ...prev, materialPurchasePoNo: latest.poNo }));
-							}
-						}
-					} catch {}
+				if (!purchaseOrders || purchaseOrders.length === 0) return;
+				
+				const parsed = purchaseOrders;
+				if (Array.isArray(parsed) && parsed.length > 0) {
+					const latest = parsed[parsed.length - 1];
+					// Only auto-fill if newOrder is blank except for materialPurchasePoNo
+					if (
+						latest && latest.poNo &&
+						!newOrder.orderPlaceDate &&
+						!newOrder.dcNo &&
+						!newOrder.vendorName &&
+						(!newOrder.items || newOrder.items.length === 0)
+					) {
+						setNewOrder(prev => ({ ...prev, materialPurchasePoNo: latest.poNo }));
+					}
 				}
 			};
 			// Initial run
 			handlePurchaseChange();
-			// Listen for changes from other tabs/windows
-			window.addEventListener('storage', handlePurchaseChange);
 			// Listen for same-tab updates via event bus
 			bus.addEventListener('purchaseOrders.updated', handlePurchaseChange as EventListener);
-			// Poll for changes as a fallback
-			const interval = setInterval(handlePurchaseChange, 1000);
 			return () => {
-				window.removeEventListener('storage', handlePurchaseChange);
 				bus.removeEventListener('purchaseOrders.updated', handlePurchaseChange as EventListener);
-				clearInterval(interval);
 			};
-		}, [newOrder.orderPlaceDate, newOrder.dcNo, newOrder.vendorName, newOrder.items]);
+		}, [newOrder.orderPlaceDate, newOrder.dcNo, newOrder.vendorName, newOrder.items, purchaseOrders]);
 
 	// Always set Material Purchase PO No to latest PO No from PurchaseModule if empty
 	useEffect(() => {
 		if (newOrder.materialPurchasePoNo) return;
-		const purchaseOrdersRaw = localStorage.getItem('purchaseOrders');
-		if (purchaseOrdersRaw) {
-			try {
-				const parsed = JSON.parse(purchaseOrdersRaw);
-				if (Array.isArray(parsed) && parsed.length > 0) {
-					const latest = parsed[parsed.length - 1];
-					if (latest && latest.poNo) {
-						setNewOrder(prev => ({ ...prev, materialPurchasePoNo: latest.poNo }));
-					}
-				}
-			} catch {}
+		if (!purchaseOrders || purchaseOrders.length === 0) return;
+		
+		const parsed = purchaseOrders;
+		if (Array.isArray(parsed) && parsed.length > 0) {
+			const latest = parsed[parsed.length - 1];
+			if (latest && latest.poNo) {
+				setNewOrder(prev => ({ ...prev, materialPurchasePoNo: latest.poNo }));
+			}
 		}
-	}, [newOrder.materialPurchasePoNo]);
+	}, [newOrder.materialPurchasePoNo, purchaseOrders]);
 
 	// Always sync Material Purchase PO No with the latest PO No from PurchaseModule
 	useEffect(() => {
 		const handlePurchaseChange = () => {
-			const purchaseOrdersRaw = localStorage.getItem('purchaseOrders');
-			if (purchaseOrdersRaw) {
-				try {
-					const parsed = JSON.parse(purchaseOrdersRaw);
-					if (Array.isArray(parsed) && parsed.length > 0) {
-						const latest = parsed[parsed.length - 1];
-						if (latest && latest.poNo) {
-							setNewOrder(prev => ({ ...prev, materialPurchasePoNo: latest.poNo }));
-						}
-					}
-				} catch {}
+			if (!purchaseOrders || purchaseOrders.length === 0) return;
+			
+			const parsed = purchaseOrders;
+			if (Array.isArray(parsed) && parsed.length > 0) {
+				const latest = parsed[parsed.length - 1];
+				if (latest && latest.poNo) {
+					setNewOrder(prev => ({ ...prev, materialPurchasePoNo: latest.poNo }));
+				}
 			}
 		};
 		// Initial run
 		handlePurchaseChange();
-		// Listen for changes from other tabs/windows
-		window.addEventListener('storage', handlePurchaseChange);
-		// Poll for changes in the same tab
-		const interval = setInterval(handlePurchaseChange, 1000);
+		// Listen for changes via event bus
+		bus.addEventListener('purchaseOrders.updated', handlePurchaseChange as EventListener);
 		return () => {
-			window.removeEventListener('storage', handlePurchaseChange);
-			clearInterval(interval);
+			bus.removeEventListener('purchaseOrders.updated', handlePurchaseChange as EventListener);
 		};
-	}, []);
+	}, [purchaseOrders]);
 
 	// Helper function to generate batch number
 
@@ -917,18 +774,18 @@ useEffect(() => {
 			
 			// SECOND: If not found in orders, try PSIR data
 			if (!oaNoValue || !batchNoValue || !orderPlaceDateValue) {
-				const psirData = getPSIRDataByPO(poNo);
-				if (psirData) {
-					if (!oaNoValue) oaNoValue = psirData.oaNo || '';
-					if (!batchNoValue) batchNoValue = psirData.batchNo || '';
-					if (!orderPlaceDateValue) orderPlaceDateValue = psirData.receivedDate || '';
+				const psirDataRecord = getPSIRDataByPO(poNo, psirData);
+				if (psirDataRecord) {
+					if (!oaNoValue) oaNoValue = psirDataRecord.oaNo || '';
+					if (!batchNoValue) batchNoValue = psirDataRecord.batchNo || '';
+					if (!orderPlaceDateValue) orderPlaceDateValue = psirDataRecord.receivedDate || '';
 					console.log('[VendorDeptModule][MaterialPOChange] ✓ Found in PSIR:', { oaNoValue, batchNoValue, orderPlaceDateValue });
 				}
 			}
 			
 			// THIRD: If vendorBatchNo not found, try to get from VSIR
 			if (!vendorBatchNoValue) {
-				vendorBatchNoValue = getVendorBatchNoFromVSIR(poNo);
+				vendorBatchNoValue = getVendorBatchNoFromVSIR(poNo, vsirRecords);
 				if (vendorBatchNoValue) {
 					console.log('[VendorDeptModule][MaterialPOChange] ✓ Fetched Vendor Batch No from VSIR:', vendorBatchNoValue);
 				} else {
@@ -952,7 +809,7 @@ useEffect(() => {
 		} catch (e) {
 			console.error('[VendorDeptModule][MaterialPOChange] Error:', e);
 		}
-	}, [newOrder.materialPurchasePoNo, orders]);
+	}, [newOrder.materialPurchasePoNo, orders, vsirRecords, psirData]);
 
 
 
@@ -961,11 +818,10 @@ useEffect(() => {
 		if (!newOrder.materialPurchasePoNo || !itemInput.itemCode) return;
 		console.log('[VendorDeptModule][AutoFill] PO No:', newOrder.materialPurchasePoNo, 'Item Code:', itemInput.itemCode);
 		// Try PSIR data first
-		const psirData = localStorage.getItem('psirData');
 		let filled = false;
 		if (psirData) {
 			try {
-				const psirs = JSON.parse(psirData);
+				const psirs = psirData;
 				for (const psir of psirs) {
 					if (psir.poNo === newOrder.materialPurchasePoNo && Array.isArray(psir.items)) {
 						const match = psir.items.find((it: any) => it.itemCode === itemInput.itemCode);
@@ -974,8 +830,8 @@ useEffect(() => {
 							// Do NOT auto-fill receivedQty from PSIR -- keep Received Qty manual
 							setItemInput(prev => ({
 								...prev,
-								qty: getPurchaseQty(newOrder.materialPurchasePoNo, match.itemCode) || match.qtyReceived || prev.qty,
-								indentStatus: (function(){ const p = getIndentStatusFromPurchase(newOrder.materialPurchasePoNo, match.itemCode || prev.itemCode, match.indentNo || psir.indentNo || prev.materialIssueNo || ''); if (p) return p && p.toUpperCase ? p.toUpperCase() : String(p); return (prev.indentStatus || '').toUpperCase(); })(),
+								qty: getPurchaseQty(newOrder.materialPurchasePoNo, match.itemCode, purchaseOrders, purchaseData) || match.qtyReceived || prev.qty,
+								indentStatus: (function(){ const p = getIndentStatusFromPurchase(newOrder.materialPurchasePoNo, match.itemCode || prev.itemCode, match.indentNo || psir.indentNo || prev.materialIssueNo || '', purchaseData, purchaseOrders); if (p) return p && p.toUpperCase ? p.toUpperCase() : String(p); return (prev.indentStatus || '').toUpperCase(); })(),
 								okQty: match.okQty || 0,
 								reworkQty: prev.reworkQty, // PSIR may not have reworkQty
 								rejectedQty: match.rejectQty || 0,
@@ -991,68 +847,40 @@ useEffect(() => {
 			}
 		}
 		// If not found in PSIR, fallback to purchaseOrders
-		if (!filled) {
-			const purchaseOrdersRaw = localStorage.getItem('purchaseOrders');
-			if (purchaseOrdersRaw) {
-				try {
-					const parsed = JSON.parse(purchaseOrdersRaw);
-					const norm = (v: any) => (v === undefined || v === null) ? '' : String(v).trim().toUpperCase();
-					const targetPo = norm(newOrder.materialPurchasePoNo);
-					const targetCode = norm(itemInput.itemCode);
-					const po = parsed.find((order: any) => norm(order.poNo) === targetPo || norm(order.poNo || order.indentNo) === targetPo);
-					console.log('[VendorDeptModule][AutoFill] Purchase order found (normalized):', !!po);
-					if (po && Array.isArray(po.items)) {
-						const match = po.items.find((it: any) => norm(it.itemCode || it.Code) === targetCode);
-						console.log('[VendorDeptModule][AutoFill] Purchase item match (normalized):', match);
-						if (match) {
-							const inferredQty = getPurchaseQty(newOrder.materialPurchasePoNo, match.itemCode) || Number(match.purchaseQty ?? match.receivedQty ?? match.qty ?? 0);
-							// Do NOT auto-fill receivedQty here — it must be entered manually
-							setItemInput(prev => ({
-								...prev,
-								qty: inferredQty,
-								okQty: match.okQty || 0,
-								reworkQty: match.reworkQty || 0,
-								rejectedQty: match.rejectedQty || 0,
-								grnNo: match.grnNo || '',
-							}));
-						}
+		if (!filled && purchaseOrders) {
+			try {
+				const parsed = purchaseOrders;
+				const norm = (v: any) => (v === undefined || v === null) ? '' : String(v).trim().toUpperCase();
+				const targetPo = norm(newOrder.materialPurchasePoNo);
+				const targetCode = norm(itemInput.itemCode);
+				const po = parsed.find((order: any) => norm(order.poNo) === targetPo || norm(order.poNo || order.indentNo) === targetPo);
+				console.log('[VendorDeptModule][AutoFill] Purchase order found (normalized):', !!po);
+				if (po && Array.isArray(po.items)) {
+					const match = po.items.find((it: any) => norm(it.itemCode || it.Code) === targetCode);
+					console.log('[VendorDeptModule][AutoFill] Purchase item match (normalized):', match);
+					if (match) {
+						const inferredQty = getPurchaseQty(newOrder.materialPurchasePoNo, match.itemCode, purchaseOrders, purchaseData) || Number(match.purchaseQty ?? match.receivedQty ?? match.qty ?? 0);
+						// Do NOT auto-fill receivedQty here — it must be entered manually
+						setItemInput(prev => ({
+							...prev,
+							qty: inferredQty,
+							okQty: match.okQty || 0,
+							reworkQty: match.reworkQty || 0,
+							rejectedQty: match.rejectedQty || 0,
+							grnNo: match.grnNo || '',
+						}));
 					}
-				} catch (err) {
-					console.error('[VendorDeptModule][AutoFill] Error parsing purchaseOrders:', err);
 				}
+			} catch (err) {
+				console.error('[VendorDeptModule][AutoFill] Error parsing purchaseOrders:', err);
 			}
 		}
-	}, [newOrder.materialPurchasePoNo, itemInput.itemCode]);
+	}, [newOrder.materialPurchasePoNo, itemInput.itemCode, psirData, purchaseOrders, purchaseData]);
 
 
 	useEffect(() => {
-		const savedData = localStorage.getItem('vendorDeptData');
-		if (savedData) {
-			try {
-				const parsed = JSON.parse(savedData);
-				const normalized = parsed.map((order: any) => ({
-					...order,
-					items: Array.isArray(order.items) ? order.items.map((it: any) => ({
-						...it,
-						indentStatus: (function(){ const p = getIndentStatusFromPurchase(order.materialPurchasePoNo, it.itemCode, it.materialIssueNo || ''); if (p) return p && p.toUpperCase ? p.toUpperCase() : String(p); return (it.indentStatus || '').toUpperCase(); })(),
-					})) : [],
-				}));
-				setOrders(normalized);
-			} catch {
-				setOrders(JSON.parse(savedData));
-			}
-		}
-		// Fetch Item Names and Codes from Item Master
-		const itemMasterRaw = localStorage.getItem('itemMasterData');
-		if (itemMasterRaw) {
-			try {
-				const parsed = JSON.parse(itemMasterRaw);
-				if (Array.isArray(parsed)) {
-					setItemMaster(parsed);
-					setItemNames(parsed.map((item: any) => item.itemName).filter(Boolean));
-				}
-			} catch {}
-		}
+		console.log('[VendorDeptModule] Loading item master data from Firestore state');
+		// Item master will be passed from parent or loaded separately
 	}, []);
 
 	const handleAddItem = () => {
@@ -1095,7 +923,7 @@ useEffect(() => {
 		if (!vendorBatchNo) {
 			// Try to fetch from VSIR by matching PO
 			console.log('[VendorDeptModule] vendorBatchNo is empty, fetching from VSIR for PO:', newOrder.materialPurchasePoNo);
-			vendorBatchNo = getVendorBatchNoFromVSIR(newOrder.materialPurchasePoNo);
+			vendorBatchNo = getVendorBatchNoFromVSIR(newOrder.materialPurchasePoNo, vsirRecords);
 			
 			if (vendorBatchNo) {
 				console.log('[VendorDeptModule] ✓ Fetched vendorBatchNo from VSIR:', vendorBatchNo);
@@ -1105,18 +933,8 @@ useEffect(() => {
 		}
 		console.log('[VendorDeptModule] Final vendorBatchNo:', vendorBatchNo);
 		
-		// Ensure uniqueness by checking against all existing orders (both in state and localStorage)
+		// Ensure uniqueness by checking against all existing orders
 		const allExistingOrders = [...orders];
-		try {
-			const savedData = localStorage.getItem('vendorDeptData');
-			if (savedData) {
-				const savedOrders = JSON.parse(savedData);
-				console.log('[VendorDeptModule] Existing orders in localStorage:', savedOrders.length);
-				allExistingOrders.push(...savedOrders);
-			}
-		} catch (err) {
-			console.error('[VendorDeptModule] Error reading localStorage:', err);
-		}
 		
 		// Check for duplicates and increment if needed
 		let counter = 0;
@@ -1148,14 +966,10 @@ useEffect(() => {
 		const updated = [...orders, orderToSave];
 		console.log('[VendorDeptModule] Updated orders array:', updated);
 		setOrders(updated);
-		localStorage.setItem('vendorDeptData', JSON.stringify(updated));
-		console.log('[VendorDeptModule] Saved to localStorage:', JSON.parse(localStorage.getItem('vendorDeptData') || '[]'));
 		
 		// DIRECTLY update VSIR records with the vendorBatchNo
 		try {
-			const vsirRaw = localStorage.getItem('vsri-records');
-			if (vsirRaw) {
-				const vsirRecords = JSON.parse(vsirRaw);
+			if (vsirRecords && Array.isArray(vsirRecords)) {
 				console.log('[VendorDeptModule] Syncing vendorBatchNo to VSIR for PO:', orderToSave.materialPurchasePoNo);
 				const updatedVsirRecords = vsirRecords.map((record: any) => {
 					// Match VSIR record by PO number (normalized comparison)
@@ -1167,8 +981,7 @@ useEffect(() => {
 					}
 					return record;
 				});
-				localStorage.setItem('vsri-records', JSON.stringify(updatedVsirRecords));
-				console.log('[VendorDeptModule] VSIR records updated and saved');
+				console.log('[VendorDeptModule] VSIR records updated');
 				// Dispatch event so VSIR component knows about the update
 				try {
 					bus.dispatchEvent(new CustomEvent('vsir.records.synced', { detail: { records: updatedVsirRecords } }));
@@ -1200,7 +1013,7 @@ useEffect(() => {
 		
 		// Only auto-fill if vendor name is empty AND we're not editing (fresh add)
 		if (editOrderIdx === null && !newOrder.vendorName) {
-			const supplierName = getSupplierNameFromPO(newOrder.materialPurchasePoNo);
+			const supplierName = getSupplierNameFromPO(newOrder.materialPurchasePoNo, purchaseOrders, purchaseData);
 			if (supplierName) {
 				console.log('[VendorDeptModule][VendorAutoFill] ✓ Fetched supplier name from PO:', supplierName);
 				setNewOrder(prev => ({ ...prev, vendorName: supplierName }));
@@ -1208,96 +1021,41 @@ useEffect(() => {
 				console.log('[VendorDeptModule][VendorAutoFill] ✗ Could not find supplier name for PO:', newOrder.materialPurchasePoNo);
 			}
 		}
-	}, [newOrder.materialPurchasePoNo, editOrderIdx, newOrder.vendorName]);
+	}, [newOrder.materialPurchasePoNo, editOrderIdx, newOrder.vendorName, purchaseOrders, purchaseData]);
 
 	const handleEditOrder = (idx: number) => {
-		// Deep clone to avoid direct mutation
-		const orderToEdit = JSON.parse(JSON.stringify(orders[idx]));
-		console.log('[DEBUG][VendorDeptModule] Editing order at idx:', idx, orderToEdit);
-		
-		// If the order doesn't have a vendor batch no, try to fetch from VSIR (don't generate)
-		if (!orderToEdit.vendorBatchNo || orderToEdit.vendorBatchNo.trim() === '') {
-			const fetchedFromVSIR = getVendorBatchNoFromVSIR(orderToEdit.materialPurchasePoNo);
-			if (fetchedFromVSIR) {
-				console.log('[VendorDeptModule] ✓ Loaded vendor batch no from VSIR:', fetchedFromVSIR);
-				orderToEdit.vendorBatchNo = fetchedFromVSIR;
-			} else {
-				console.log('[VendorDeptModule] ✗ Vendor Batch No not found in VSIR - will remain empty');
-			}
-		}
-		
-		setNewOrder(orderToEdit);
-		setEditOrderIdx(idx);
-	};
-
+				// Deep clone to avoid direct mutation
+				const orderToEdit = JSON.parse(JSON.stringify(orders[idx]));
+				console.log('[DEBUG][VendorDeptModule] Editing order at idx:', idx, orderToEdit);
+				
+				// If the order doesn't have a vendor batch no, try to fetch from VSIR (don't generate)
+				if (!orderToEdit.vendorBatchNo || orderToEdit.vendorBatchNo.trim() === '') {
+					const fetchedFromVSIR = getVendorBatchNoFromVSIR(orderToEdit.materialPurchasePoNo, vsirRecords);
+					if (fetchedFromVSIR) {
+						console.log('[VendorDeptModule] ✓ Loaded vendor batch no from VSIR:', fetchedFromVSIR);
+						orderToEdit.vendorBatchNo = fetchedFromVSIR;
+					} else {
+						console.log('[VendorDeptModule] ✗ Vendor Batch No not found in VSIR - will remain empty');
+					}
+				}
+				
+				setNewOrder(orderToEdit);
+				setEditOrderIdx(idx);
+			};
 	const handleUpdateOrder = () => {
 		if (editOrderIdx === null) return;
 		console.log('[DEBUG][VendorDeptModule] Saving newOrder at idx:', editOrderIdx, newOrder);
 		console.log('[DEBUG][VendorDeptModule] batchNo value:', newOrder.batchNo);
-		// Ensure batchNo is preserved during update
-		const orderToSave = {
-			orderPlaceDate: newOrder.orderPlaceDate,
-			materialPurchasePoNo: newOrder.materialPurchasePoNo,
-			oaNo: newOrder.oaNo,
-			batchNo: newOrder.batchNo,
-			vendorBatchNo: newOrder.vendorBatchNo,
-			dcNo: newOrder.dcNo,
-			vendorName: newOrder.vendorName,
-			items: newOrder.items,
-		};
-		console.log('[DEBUG][VendorDeptModule] Order to save with batchNo:', orderToSave);
-		
-		// CRITICAL: Reload from localStorage to ensure we're updating the correct record
-		let updated = orders;
-		try {
-			const savedData = localStorage.getItem('vendorDeptData');
-			if (savedData) {
-				updated = JSON.parse(savedData);
-				console.log('[DEBUG][VendorDeptModule] Reloaded from localStorage, array length:', updated.length);
-			}
-		} catch (err) {
-			console.error('[DEBUG][VendorDeptModule] Error reloading from localStorage:', err);
-			// Fall back to current orders state if localStorage fails
-			updated = orders;
-		}
-		
-		// Save the edited order at the correct index
-		updated = updated.map((order: any, idx: number) => idx === editOrderIdx ? orderToSave : order);
-		console.log('[DEBUG][VendorDeptModule] Updated orders array after save:', updated);
+
+		const updated = orders.map((order, idx) => idx === editOrderIdx ? newOrder : order);
 		setOrders(updated);
-		localStorage.setItem('vendorDeptData', JSON.stringify(updated));
 		
-		// DIRECTLY update VSIR records with the vendorBatchNo
-		try {
-			const vsirRaw = localStorage.getItem('vsri-records');
-			if (vsirRaw) {
-				const vsirRecords = JSON.parse(vsirRaw);
-				console.log('[VendorDeptModule] Syncing vendorBatchNo to VSIR for PO:', orderToSave.materialPurchasePoNo);
-				const updatedVsirRecords = vsirRecords.map((record: any) => {
-					const recordPoNo = String(record.poNo || '').trim();
-					const orderPoNo = String(orderToSave.materialPurchasePoNo || '').trim();
-					if (recordPoNo === orderPoNo) {
-						console.log('[VendorDeptModule] ✓ VSIR record matched for PO', orderPoNo, '- updating vendorBatchNo:', orderToSave.vendorBatchNo);
-						return { ...record, vendorBatchNo: orderToSave.vendorBatchNo };
-					}
-					return record;
-				});
-				localStorage.setItem('vsri-records', JSON.stringify(updatedVsirRecords));
-				console.log('[VendorDeptModule] VSIR records updated and saved');
-				try {
-					bus.dispatchEvent(new CustomEvent('vsir.records.synced', { detail: { records: updatedVsirRecords } }));
-				} catch {}
-			}
-		} catch (err) {
-			console.error('[VendorDeptModule] Error syncing to VSIR (update):', err);
-		}
-		
-		// Dispatch event so VSIR can sync the vendorBatchNo (legacy event for safety)
+		// Dispatch event so Purchase Module can sync
 		try {
 			bus.dispatchEvent(new CustomEvent('vendorDept.updated', { detail: { vendorDeptData: updated } }));
-			console.log('[VendorDeptModule] Dispatched vendorDept.updated event for VSIR sync (update)');
+			console.log('[VendorDeptModule] Dispatched vendorDept.updated event');
 		} catch (err) {
-			console.error('[VendorDeptModule] Error dispatching vendorDept.updated event (update):', err);
+			console.error('[VendorDeptModule] Error dispatching vendorDept.updated event:', err);
 		}
 		
 		clearNewOrder();
@@ -1417,9 +1175,9 @@ useEffect(() => {
 						itemName,
 						itemCode,
 						materialIssueNo: '',
-						qty: getPurchaseQty(poNo, itemCode) || item.qty || 0,
+						qty: getPurchaseQty(poNo, itemCode, purchaseOrders, purchaseData) || item.qty || 0,
 						indentStatus: (function() {
-							const purchaseStatus = getIndentStatusFromPurchase(poNo, itemCode, item.indentNo || '');
+							const purchaseStatus = getIndentStatusFromPurchase(poNo, itemCode, item.indentNo || '', purchaseData, purchaseOrders);
 							if (purchaseStatus) return purchaseStatus && purchaseStatus.toUpperCase ? purchaseStatus.toUpperCase() : String(purchaseStatus);
 							return (item.indentStatus || '').toUpperCase();
 						})(),
@@ -1532,7 +1290,7 @@ useEffect(() => {
 				localStorage.setItem('vendorDeptData', JSON.stringify(newOrders));
 			}
 		}
-	}, [purchasePOs]);
+	}, [purchaseOrders]);
 
 	// Regenerate vendor batch nos for existing orders that don't have them
 	const regenerateVendorBatchNos = () => {
@@ -1661,7 +1419,7 @@ const handleVSIRUpdate = (event?: any) => {
 			console.log('[VendorDeptModule] Current VendorDept orders:', prevOrders.map(o => ({ poNo: o.materialPurchasePoNo, vendorBatchNo: o.vendorBatchNo })));
 			const updated = prevOrders.map(order => {
 				if (!order.vendorBatchNo || !order.vendorBatchNo.trim()) {
-					const fetched = getVendorBatchNoFromVSIR(order.materialPurchasePoNo);
+					const fetched = getVendorBatchNoFromVSIR(order.materialPurchasePoNo, vsirRecords);
 					console.log('[VendorDeptModule] Attempting to fetch for PO:', order.materialPurchasePoNo, '-> Result:', fetched);
 					if (fetched) {
 						console.log('[VendorDept] Synced vendorBatchNo for PO', order.materialPurchasePoNo, ':', fetched);
@@ -1967,14 +1725,12 @@ const handleVSIRUpdate = (event?: any) => {
 
 	// Non-destructive sync: only fill empty qty values
 	const syncEmptyVendorDeptQty = () => {
-		const raw = localStorage.getItem('vendorDeptData');
-		if (!raw) return;
-		const vd = JSON.parse(raw) as VendorDeptOrder[];
+		if (orders.length === 0) return;
 		let changed = false;
-		const updated = vd.map(order => ({
+		const updated = orders.map(order => ({
 			...order,
 			items: (order.items || []).map(it => {
-				const p = getPurchaseQty(order.materialPurchasePoNo, it.itemCode) || 0;
+				const p = getPurchaseQty(order.materialPurchasePoNo, it.itemCode, purchaseOrders, purchaseData) || 0;
 				if ((!it.qty || Number(it.qty) === 0) && p > 0) {
 					changed = true;
 					return { ...it, qty: p };
@@ -1983,7 +1739,6 @@ const handleVSIRUpdate = (event?: any) => {
 			})
 		}));
 		if (changed) {
-			localStorage.setItem('vendorDeptData', JSON.stringify(updated));
 			setOrders(updated);
 			console.log('[VendorDeptModule] Sync Empty Qty applied');
 		} else {
@@ -1993,14 +1748,12 @@ const handleVSIRUpdate = (event?: any) => {
 
 	// Force sync: overwrite all qty where purchase data exists
 	const forceVendorDeptSync = () => {
-		const raw = localStorage.getItem('vendorDeptData');
-		if (!raw) return;
-		const vd = JSON.parse(raw) as VendorDeptOrder[];
+		if (orders.length === 0) return;
 		let changed = false;
-		const updated = vd.map(order => ({
+		const updated = orders.map(order => ({
 			...order,
 			items: (order.items || []).map(it => {
-				const p = getPurchaseQty(order.materialPurchasePoNo, it.itemCode) || 0;
+				const p = getPurchaseQty(order.materialPurchasePoNo, it.itemCode, purchaseOrders, purchaseData) || 0;
 				if (p > 0 && Number(it.qty) !== p) {
 					changed = true;
 					return { ...it, qty: p };
@@ -2009,7 +1762,6 @@ const handleVSIRUpdate = (event?: any) => {
 			})
 		}));
 		if (changed) {
-			localStorage.setItem('vendorDeptData', JSON.stringify(updated));
 			setOrders(updated);
 			console.log('[VendorDeptModule] Force Sync applied');
 		} else {

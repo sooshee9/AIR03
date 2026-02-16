@@ -1,9 +1,6 @@
 import React, { useEffect, useState } from "react";
 import bus from '../utils/eventBus';
 import { subscribeFirestoreDocs, replaceFirestoreCollection } from '../utils/firestoreSync';
-import { getPurchaseData } from '../utils/firestoreServices';
-import { onAuthStateChanged } from 'firebase/auth';
-import { auth } from '../firebase';
 
 interface PurchaseEntry {
   orderPlaceDate: string;
@@ -40,7 +37,6 @@ const PurchaseModule: React.FC<PurchaseModuleProps> = ({ user }) => {
   const [entries, setEntries] = useState<PurchaseEntry[]>([]);
   const [itemNames, setItemNames] = useState<string[]>([]);
   const [lastImport, setLastImport] = useState<number>(0);
-  // const [userUid, setUserUid] = useState<string | null>(null);
   
   // Real-time Firestore data
   const [openIndentItems, setOpenIndentItems] = useState<any[]>([]);
@@ -80,14 +76,36 @@ const PurchaseModule: React.FC<PurchaseModuleProps> = ({ user }) => {
 
   // Subscribe to Firestore collections
   useEffect(() => {
-    const unsubOpen = subscribeFirestoreDocs(uid, 'openIndentItems', setOpenIndentItems);
-    const unsubClosed = subscribeFirestoreDocs(uid, 'closedIndentItems', setClosedIndentItems);
-    const unsubStock = subscribeFirestoreDocs(uid, 'stock-records', setStockRecords);
-    const unsubIndent = subscribeFirestoreDocs(uid, 'indentData', setIndentData);
-    const unsubItemMaster = subscribeFirestoreDocs(uid, 'itemMasterData', setItemMasterData);
-    const unsubPsir = subscribeFirestoreDocs(uid, 'psirData', setPsirData);
+    console.info('[PurchaseModule] Setting up Firestore subscriptions for user:', uid);
+    
+    // Note: Using correct collection names that match firestoreServices.ts
+    const unsubOpen = subscribeFirestoreDocs(uid, 'openIndentItems', (docs) => {
+      console.debug('[PurchaseModule] openIndentItems updated:', docs.length, 'records');
+      setOpenIndentItems(docs);
+    });
+    const unsubClosed = subscribeFirestoreDocs(uid, 'closedIndentItems', (docs) => {
+      console.debug('[PurchaseModule] closedIndentItems updated:', docs.length, 'records');
+      setClosedIndentItems(docs);
+    });
+    const unsubStock = subscribeFirestoreDocs(uid, 'stockRecords', (docs) => {
+      console.debug('[PurchaseModule] stockRecords updated:', docs.length, 'records');
+      setStockRecords(docs);
+    });
+    const unsubIndent = subscribeFirestoreDocs(uid, 'indentData', (docs) => {
+      console.debug('[PurchaseModule] indentData updated:', docs.length, 'records');
+      setIndentData(docs);
+    });
+    const unsubItemMaster = subscribeFirestoreDocs(uid, 'itemMaster', (docs) => {
+      console.debug('[PurchaseModule] itemMaster updated:', docs.length, 'records');
+      setItemMasterData(docs);
+    });
+    const unsubPsir = subscribeFirestoreDocs(uid, 'psirData', (docs) => {
+      console.debug('[PurchaseModule] psirData updated:', docs.length, 'records');
+      setPsirData(docs);
+    });
     
     return () => {
+      console.debug('[PurchaseModule] Unsubscribing from all Firestore collections');
       unsubOpen();
       unsubClosed();
       unsubStock();
@@ -96,25 +114,6 @@ const PurchaseModule: React.FC<PurchaseModuleProps> = ({ user }) => {
       unsubPsir();
     };
   }, [uid]);
-
-  // Persist helper for purchase data
-  // persistPurchaseData helper is not used; remove to fix build error.
-
-  useEffect(() => {
-    const unsubAuth = onAuthStateChanged(auth, (u) => {
-      // setUserUid(u ? u.uid : null);
-      // if signed in, ensure one-time sync from Firestore to localStorage
-      if (u && u.uid) {
-        (async () => {
-          try {
-            const pd = await getPurchaseData(u.uid).catch(() => []);
-            try { localStorage.setItem('purchaseData', JSON.stringify(pd)); } catch {}
-          } catch (err) { console.error('[Purchase] sync failed', err); }
-        })();
-      }
-    });
-    return () => { try { unsubAuth(); } catch {} };
-  }, []);
 
   // 🎯 FIXED: Get status from indent source (open/closed indents)
   const getStatusFromIndent = (item: any): string => {
@@ -241,10 +240,6 @@ const PurchaseModule: React.FC<PurchaseModuleProps> = ({ user }) => {
   // 🎯 ENHANCED: Get live stock for a purchase entry - EXACT MATCH TO INDENT MODULE
   const getLiveStockForEntry = (entry: PurchaseEntry): number => {
     try {
-      const openIndentRaw = localStorage.getItem('openIndentItems');
-      const closedIndentRaw = localStorage.getItem('closedIndentItems');
-      const openIndentItems = openIndentRaw ? JSON.parse(openIndentRaw) : [];
-      const closedIndentItems = closedIndentRaw ? JSON.parse(closedIndentRaw) : [];
       const allIndentItems = [...openIndentItems, ...closedIndentItems];
 
       const normIndent = normalizeField(entry.indentNo);
@@ -279,7 +274,7 @@ const PurchaseModule: React.FC<PurchaseModuleProps> = ({ user }) => {
                 return av;
               }
             }
-            // Use Firestore indentData from state instead of localStorage
+            // Use Firestore indentData from state
             const indents = indentData;
 
             // find the indices for this indent/item within indentData
@@ -345,8 +340,7 @@ const PurchaseModule: React.FC<PurchaseModuleProps> = ({ user }) => {
             }
 
             // Get closing stock from stock-records (same as IndentModule.getStock)
-            const stockRaw = localStorage.getItem('stock-records');
-            const stocks = stockRaw ? JSON.parse(stockRaw) : [];
+            const stocks = _stockRecords;
             const stockRec = stocks.find((s: any) => normalizeField(s.itemCode) === normCode);
             const closingStock = stockRec && !isNaN(Number(stockRec.closingStock)) ? Number(stockRec.closingStock) : 0;
 
@@ -380,8 +374,6 @@ const PurchaseModule: React.FC<PurchaseModuleProps> = ({ user }) => {
           // Attempt same derived calculation using indentData for first matching item
           try {
             const normCodeFallback = normalizeField(indentItem.itemCode || indentItem.Code || '');
-            const indentDataRaw = localStorage.getItem('indentData');
-            const indentData = indentDataRaw ? JSON.parse(indentDataRaw) : [];
             let targetIndentIdx = -1;
             let targetItemIdx = -1;
             for (let i = 0; i < indentData.length; i++) {
@@ -428,8 +420,7 @@ const PurchaseModule: React.FC<PurchaseModuleProps> = ({ user }) => {
               }
             }
 
-            const stockRaw = localStorage.getItem('stock-records');
-            const stocks = stockRaw ? JSON.parse(stockRaw) : [];
+            const stocks = _stockRecords;
             const stockRec = stocks.find((s: any) => normalizeField(s.itemCode) === normalizeField(indentItem.itemCode || indentItem.Code || ''));
             const closingStock = stockRec && !isNaN(Number(stockRec.closingStock)) ? Number(stockRec.closingStock) : 0;
 
@@ -463,10 +454,6 @@ const PurchaseModule: React.FC<PurchaseModuleProps> = ({ user }) => {
   // Get live stock display + whether it's a shortage (matches IndentModule display logic)
   const getLiveStockInfo = (entry: PurchaseEntry): { display: number; isShort: boolean } => {
     try {
-      const openIndentRaw = localStorage.getItem('openIndentItems');
-      const closedIndentRaw = localStorage.getItem('closedIndentItems');
-      const openIndentItems = openIndentRaw ? JSON.parse(openIndentRaw) : [];
-      const closedIndentItems = closedIndentRaw ? JSON.parse(closedIndentRaw) : [];
       const allIndentItems = [...openIndentItems, ...closedIndentItems];
 
       const normIndent = normalizeField(entry.indentNo);
@@ -494,14 +481,16 @@ const PurchaseModule: React.FC<PurchaseModuleProps> = ({ user }) => {
                 return { display: av, isShort: false };
               }
             }
-            const indentDataRaw = localStorage.getItem('indentData');
-            const indentData = indentDataRaw ? JSON.parse(indentDataRaw) : [];
 
+            // Use Firestore indentData from state
+            const indents = indentData;
+
+            // find the indices for this indent/item within indentData
             let found = false;
             let targetIndentIdx = -1;
             let targetItemIdx = -1;
-            for (let i = 0; i < indentData.length && !found; i++) {
-              const ind = indentData[i];
+            for (let i = 0; i < indents.length && !found; i++) {
+              const ind = indents[i];
               if (!ind || !Array.isArray(ind.items)) continue;
               if (normalizeField(ind.indentNo) !== itemIndentNo) continue;
               for (let j = 0; j < ind.items.length; j++) {
@@ -546,8 +535,7 @@ const PurchaseModule: React.FC<PurchaseModuleProps> = ({ user }) => {
               }
             }
 
-            const stockRaw = localStorage.getItem('stock-records');
-            const stocks = stockRaw ? JSON.parse(stockRaw) : [];
+            const stocks = _stockRecords;
             const stockRec = stocks.find((s: any) => normalizeField(s.itemCode) === normCode);
             const closingStock = stockRec && !isNaN(Number(stockRec.closingStock)) ? Number(stockRec.closingStock) : 0;
 
@@ -588,8 +576,6 @@ const PurchaseModule: React.FC<PurchaseModuleProps> = ({ user }) => {
               }
             }
             const normCodeFallback = normalizeField(indentItem.itemCode || indentItem.Code || '');
-            const indentDataRaw = localStorage.getItem('indentData');
-            const indentData = indentDataRaw ? JSON.parse(indentDataRaw) : [];
             let targetIndentIdx = -1;
             let targetItemIdx = -1;
             for (let i = 0; i < indentData.length; i++) {
@@ -627,8 +613,7 @@ const PurchaseModule: React.FC<PurchaseModuleProps> = ({ user }) => {
               }
             }
 
-            const stockRaw = localStorage.getItem('stock-records');
-            const stocks = stockRaw ? JSON.parse(stockRaw) : [];
+            const stocks = _stockRecords;
             const stockRec = stocks.find((s: any) => normalizeField(s.itemCode) === normalizeField(indentItem.itemCode || indentItem.Code || ''));
             const closingStock = stockRec && !isNaN(Number(stockRec.closingStock)) ? Number(stockRec.closingStock) : 0;
 
@@ -695,13 +680,7 @@ const PurchaseModule: React.FC<PurchaseModuleProps> = ({ user }) => {
 
   const generateDebugReport = () => {
     try {
-      const openIndentRaw = localStorage.getItem('openIndentItems');
-      const closedIndentRaw = localStorage.getItem('closedIndentItems');
-      const openIndentItems = openIndentRaw ? JSON.parse(openIndentRaw) : [];
-      const closedIndentItems = closedIndentRaw ? JSON.parse(closedIndentRaw) : [];
-
-      const purchaseDataRaw = localStorage.getItem('purchaseData');
-      const purchaseData = purchaseDataRaw ? JSON.parse(purchaseDataRaw) : [];
+      const purchaseData = entries;
 
       const stockComparison = purchaseData.map((entry: any) => {
         const liveStock = getLiveStockForEntry(entry);
@@ -740,9 +719,7 @@ const PurchaseModule: React.FC<PurchaseModuleProps> = ({ user }) => {
 
   const persistIndentStockToPurchaseData = () => {
     try {
-      const purchaseDataRaw = localStorage.getItem('purchaseData');
-      const purchaseData = purchaseDataRaw ? JSON.parse(purchaseDataRaw) : [];
-      const updated = purchaseData.map((entry: any) => {
+      const updated = entries.map((entry: any) => {
         const live = getLiveStockForEntry(entry);
         if (live !== entry.currentStock) {
           return { 
@@ -755,7 +732,7 @@ const PurchaseModule: React.FC<PurchaseModuleProps> = ({ user }) => {
       });
       
       const changedCount = updated.filter((entry: any, index: number) => 
-        entry.currentStock !== purchaseData[index]?.currentStock
+        entry.currentStock !== entries[index]?.currentStock
       ).length;
       
       saveEntries(updated);
@@ -824,10 +801,6 @@ const PurchaseModule: React.FC<PurchaseModuleProps> = ({ user }) => {
   const manuallyImportAndOverwrite = () => {
     console.log('[PurchaseModule] Manual import triggered');
     
-    const openIndentRaw = localStorage.getItem('openIndentItems');
-    const closedIndentRaw = localStorage.getItem('closedIndentItems');
-    const openIndentItems = openIndentRaw ? JSON.parse(openIndentRaw) : [];
-    const closedIndentItems = closedIndentRaw ? JSON.parse(closedIndentRaw) : [];
     const allIndentItems = [...openIndentItems, ...closedIndentItems];
 
     if (allIndentItems.length === 0) {
@@ -1057,13 +1030,7 @@ const PurchaseModule: React.FC<PurchaseModuleProps> = ({ user }) => {
     if (!newEntry.poNo || !newEntry.itemCode) return;
     
     try {
-      const psirRaw = localStorage.getItem('psirData');
-      if (!psirRaw) {
-        console.debug('[PurchaseModule][AutoFill] No psirData found');
-        return;
-      }
-      
-      const psirs = JSON.parse(psirRaw);
+      const psirs = _psirData;
       if (!Array.isArray(psirs)) return;
       
       // Find matching PSIR record for this PO and item
@@ -1105,10 +1072,7 @@ const PurchaseModule: React.FC<PurchaseModuleProps> = ({ user }) => {
     if (entries.length === 0) return;
     
     try {
-      const psirRaw = localStorage.getItem('psirData');
-      if (!psirRaw) return;
-      
-      const psirs = JSON.parse(psirRaw);
+      const psirs = _psirData;
       if (!Array.isArray(psirs)) return;
       
       let updated = false;
@@ -1161,18 +1125,10 @@ const PurchaseModule: React.FC<PurchaseModuleProps> = ({ user }) => {
       setEntries(prev => [...prev]);
     };
 
-    const storageHandler = (e: StorageEvent) => {
-      if (e.key === 'psirData') {
-        handlePSIRUpdate();
-      }
-    };
-
-    window.addEventListener('storage', storageHandler);
     bus.addEventListener('psir.updated', handlePSIRUpdate as EventListener);
     console.log('[PurchaseModule] Listeners registered for PSIR updates');
 
     return () => {
-      window.removeEventListener('storage', storageHandler);
       bus.removeEventListener('psir.updated', handlePSIRUpdate as EventListener);
       console.log('[PurchaseModule] Listeners removed for PSIR updates');
     };
@@ -1180,18 +1136,10 @@ const PurchaseModule: React.FC<PurchaseModuleProps> = ({ user }) => {
 
   // Load item master names
   useEffect(() => {
-    const raw = localStorage.getItem("itemMasterData");
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          setItemNames(parsed.map((i: any) => i.itemName).filter(Boolean));
-        }
-      } catch (error) {
-        console.error('Error loading item names:', error);
-      }
+    if (Array.isArray(_itemMasterData)) {
+      setItemNames(_itemMasterData.map((i: any) => i.itemName).filter(Boolean));
     }
-  }, []);
+  }, [_itemMasterData]);
 
   // One-time sync at startup: refresh purchaseData from indent storage so Stock reflects current indent values
   useEffect(() => {
@@ -1207,16 +1155,10 @@ const PurchaseModule: React.FC<PurchaseModuleProps> = ({ user }) => {
   const refreshData = () => {
     console.log('[PurchaseModule] Refreshing data with status and stock sync');
     
-    const purchaseData = localStorage.getItem("purchaseData");
-    const openIndentRaw = localStorage.getItem('openIndentItems');
-    const closedIndentRaw = localStorage.getItem('closedIndentItems');
-    
-    if (!purchaseData) return;
+    if (entries.length === 0) return;
 
     try {
-      const parsedData = JSON.parse(purchaseData);
-      const openIndentItems = openIndentRaw ? JSON.parse(openIndentRaw) : [];
-      const closedIndentItems = closedIndentRaw ? JSON.parse(closedIndentRaw) : [];
+      const parsedData = entries;
       
       // Create status and stock maps
       const statusMap = new Map<string, string>();
@@ -1300,11 +1242,6 @@ const PurchaseModule: React.FC<PurchaseModuleProps> = ({ user }) => {
   // Debug function to check status and stock sync
   const debugStatusSync = () => {
     console.log('=== DEBUG STATUS & STOCK SYNC ===');
-    
-    const openIndentRaw = localStorage.getItem('openIndentItems');
-    const closedIndentRaw = localStorage.getItem('closedIndentItems');
-    const openIndentItems = openIndentRaw ? JSON.parse(openIndentRaw) : [];
-    const closedIndentItems = closedIndentRaw ? JSON.parse(closedIndentRaw) : [];
     
     console.log('Open Indents:', openIndentItems);
     console.log('Closed Indents:', closedIndentItems);

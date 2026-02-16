@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import bus from '../utils/eventBus';
 import { onAuthStateChanged } from 'firebase/auth';
-import { auth } from '../firebase';
+import { auth, db } from '../firebase';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import {
   subscribeVendorIssues,
   addVendorIssue,
@@ -9,6 +10,7 @@ import {
   deleteVendorIssue,
   subscribeVendorDepts,
   getItemMaster,
+  subscribeVSIRRecords,
 } from '../utils/firestoreServices';
 
 interface VendorIssueItem {
@@ -80,6 +82,39 @@ const VendorIssueModule: React.FC = () => {
     }
   });
 
+  // Migrate existing localStorage `vendorIssueData` into Firestore on sign-in
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => {
+      const uid = u ? u.uid : null;
+      if (uid) {
+        (async () => {
+          try {
+            const raw = localStorage.getItem('vendorIssueData');
+            if (raw) {
+              const arr = JSON.parse(raw || '[]');
+              if (Array.isArray(arr) && arr.length > 0) {
+                for (const it of arr) {
+                  try {
+                    const payload = { ...it } as any;
+                    if (typeof payload.id !== 'undefined') delete payload.id;
+                    const col = collection(db, 'userData', uid, 'vendorIssueData');
+                    await addDoc(col, { ...payload, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+                  } catch (err) {
+                    console.warn('[VendorIssueModule] migration addDoc failed for item', it, err);
+                  }
+                }
+                try { localStorage.removeItem('vendorIssueData'); } catch {}
+              }
+            }
+          } catch (err) {
+            console.error('[VendorIssueModule] Migration failed:', err);
+          }
+        })();
+      }
+    });
+    return () => { try { unsub(); } catch {} };
+  }, []);
+
   const [newIssue, setNewIssue] = useState<VendorIssue>({
     date: '',
     materialPurchasePoNo: '',
@@ -105,22 +140,16 @@ const VendorIssueModule: React.FC = () => {
   const [itemMaster, setItemMaster] = useState<{ itemName: string; itemCode: string }[]>([]);
   const [vendorDeptOrders, setVendorDeptOrders] = useState<any[]>([]);
   const [userUid, setUserUid] = useState<string | null>(null);
-  // const [vsirRecords, setVsirRecords] = useState<any[]>([]);
+  const [vsirRecords, setVsirRecords] = useState<any[]>([]);
   const [editIssueIdx, setEditIssueIdx] = useState<number | null>(null);
 
-  // Persist helper: writes to Firestore when logged in, otherwise localStorage
-  const persistVendorIssues = async (updatedIssues: VendorIssue[]) => {
-    setIssues(updatedIssues.map(i => ({ ...i })));
-        // if (added) {
-        //   console.debug('[VendorIssueModule][AutoImport] Imported new issues:', newIssues);
-        //   setIssues(newIssues);
-        //   try { persistVendorIssues(newIssues); } catch (err) { console.error('[VendorIssueModule] persistVendorIssues failed', err); }
-        // }
+  // Helper: get vendor batch no from subscribed VSIR records
+  const getVendorBatchNoFromVSIR = (poNo: any): string => {
     try {
-      // if (!poNo) return '';
-      // const poNoNormalized = String(poNo).trim();
-      // Removed reference to poNoNormalized (was undefined)
-      return '';
+      if (!poNo) return '';
+      const poNoNormalized = String(poNo).trim();
+      const match = vsirRecords.find((r: any) => String(r.poNo || '').trim() === poNoNormalized && r.vendorBatchNo && String(r.vendorBatchNo).trim());
+      return match ? match.vendorBatchNo : '';
     } catch (err) {
       console.debug('[VendorIssueModule] Error getting vendorBatchNo from VSIR (state):', err);
       return '';
@@ -144,7 +173,7 @@ const VendorIssueModule: React.FC = () => {
   useEffect(() => {
     let unsubIssues: (() => void) | null = null;
     let unsubVendorDepts: (() => void) | null = null;
-    // let unsubVsir: (() => void) | null = null;
+    let unsubVsir: (() => void) | null = null;
 
     if (!userUid) {
       // when not authenticated, keep using localStorage (existing behavior)
@@ -163,7 +192,7 @@ const VendorIssueModule: React.FC = () => {
     } catch (err) { console.error('[VendorIssueModule] subscribeVendorDepts failed:', err); }
 
     try {
-      // unsubVsir = subscribeVSIRRecords(userUid, (docs) => setVsirRecords(docs));
+      unsubVsir = subscribeVSIRRecords(userUid, (docs) => setVsirRecords(docs));
     } catch (err) { console.error('[VendorIssueModule] subscribeVSIRRecords failed:', err); }
 
     // Try to prime itemMaster from Firestore
@@ -180,7 +209,7 @@ const VendorIssueModule: React.FC = () => {
     return () => {
       if (unsubIssues) unsubIssues();
       if (unsubVendorDepts) unsubVendorDepts();
-      // if (unsubVsir) unsubVsir();
+      if (unsubVsir) unsubVsir();
     };
   }, [userUid]);
 
@@ -354,11 +383,11 @@ const VendorIssueModule: React.FC = () => {
     
     // If Vendor Batch No not found, try VSIR data
     if (!vendorBatchNoValue) {
-      // const vsirVendorBatchNo = getVendorBatchNoFromVSIR(newIssue.materialPurchasePoNo);
-      // if (vsirVendorBatchNo) {
-      //   vendorBatchNoValue = vsirVendorBatchNo;
-      //   console.debug('[VendorIssueModule][AutoFill] Found vendor batch no from VSIR:', vendorBatchNoValue);
-      // }
+      const vsirVendorBatchNo = getVendorBatchNoFromVSIR(newIssue.materialPurchasePoNo);
+      if (vsirVendorBatchNo) {
+        vendorBatchNoValue = vsirVendorBatchNo;
+        console.debug('[VendorIssueModule][AutoFill] Found vendor batch no from VSIR:', vendorBatchNoValue);
+      }
     }
     
     setNewIssue(prev => {
@@ -409,8 +438,21 @@ const VendorIssueModule: React.FC = () => {
     if (updated) {
       console.debug('[VendorIssueModule][Sync] Syncing vendor info to issues');
       setIssues(updatedIssues);
-      // persist using centralized helper (handles Firestore or localStorage fallback)
-      try { persistVendorIssues(updatedIssues); } catch (err) { console.error('[VendorIssueModule] persistVendorIssues failed', err); }
+      if (userUid) {
+        (async () => {
+          try {
+            await Promise.all(updatedIssues.map(async (iss: any) => {
+              if (iss.id) await updateVendorIssue(userUid, iss.id, iss);
+              else await addVendorIssue(userUid, iss);
+            }));
+          } catch (err) {
+            console.error('[VendorIssueModule] Failed to persist synced vendor info to Firestore:', err);
+            try { localStorage.setItem('vendorIssueData', JSON.stringify(updatedIssues)); } catch {}
+          }
+        })();
+      } else {
+        try { localStorage.setItem('vendorIssueData', JSON.stringify(updatedIssues)); } catch {}
+      }
     }
   }, [vendorDeptOrders]);
 
@@ -437,7 +479,20 @@ const VendorIssueModule: React.FC = () => {
       }
       const updated = [...issues, { ...newIssue, dcNo: autoDcNo, issueNo: getNextIssueNo(issues) }];
       setIssues(updated);
-      try { persistVendorIssues(updated); } catch (err) { console.error('[VendorIssueModule] persistVendorIssues failed', err); }
+      if (userUid) {
+        (async () => {
+          try {
+            const last = updated[updated.length - 1];
+            if (last && !last.id) await addVendorIssue(userUid, last);
+            // Let subscription refresh the list; keep local UI responsive
+          } catch (err) {
+            console.error('[VendorIssueModule] Failed to add Vendor Issue to Firestore:', err);
+            try { localStorage.setItem('vendorIssueData', JSON.stringify(updated)); } catch {}
+          }
+        })();
+      } else {
+        try { localStorage.setItem('vendorIssueData', JSON.stringify(updated)); } catch {}
+      }
       clearNewIssue(updated);
       console.debug('[VendorIssueModule][AutoAdd] Auto-added Vendor Issue:', { ...newIssue, dcNo: autoDcNo });
     }
@@ -521,11 +576,11 @@ const VendorIssueModule: React.FC = () => {
           
           // If vendor batch no not found in VendorDept, try VSIR
           if (!autoVendorBatchNo) {
-            // const vsirVendorBatchNo = getVendorBatchNoFromVSIR(poNo);
-            // if (vsirVendorBatchNo) {
-            //   autoVendorBatchNo = vsirVendorBatchNo;
-            //   console.debug('[VendorIssueModule][AutoImport] Found vendor batch no from VSIR:', autoVendorBatchNo);
-            // }
+            const vsirVendorBatchNo = getVendorBatchNoFromVSIR(poNo);
+            if (vsirVendorBatchNo) {
+              autoVendorBatchNo = vsirVendorBatchNo;
+              console.debug('[VendorIssueModule][AutoImport] Found vendor batch no from VSIR:', autoVendorBatchNo);
+            }
           }
           
           console.debug('[VendorIssueModule][AutoImport] Vendor Name:', autoVendorName, 'Vendor Batch No:', autoVendorBatchNo);
@@ -548,7 +603,21 @@ const VendorIssueModule: React.FC = () => {
       if (added) {
         console.debug('[VendorIssueModule][AutoImport] Imported new issues:', newIssues);
         setIssues(newIssues);
-        try { persistVendorIssues(newIssues); } catch (err) { console.error('[VendorIssueModule] persistVendorIssues failed', err); }
+        if (userUid) {
+          (async () => {
+            try {
+              await Promise.all(newIssues.map(async (iss: any) => {
+                if (iss.id) await updateVendorIssue(userUid, iss.id, iss);
+                else await addVendorIssue(userUid, iss);
+              }));
+            } catch (err) {
+              console.error('[VendorIssueModule] Failed to persist imported issues to Firestore:', err);
+              try { localStorage.setItem('vendorIssueData', JSON.stringify(newIssues)); } catch {}
+            }
+          })();
+        } else {
+          try { localStorage.setItem('vendorIssueData', JSON.stringify(newIssues)); } catch {}
+        }
       }
     };
 
@@ -590,7 +659,21 @@ const VendorIssueModule: React.FC = () => {
       if (updated) {
         console.debug('[VendorIssueModule][FillMissing] Updated issues:', updatedIssues);
         setIssues(updatedIssues);
-        try { persistVendorIssues(updatedIssues); } catch (err) { console.error('[VendorIssueModule] persistVendorIssues failed', err); }
+        if (userUid) {
+          (async () => {
+            try {
+              await Promise.all(updatedIssues.map(async (iss: any) => {
+                if (iss.id) await updateVendorIssue(userUid, iss.id, iss);
+                else await addVendorIssue(userUid, iss);
+              }));
+            } catch (err) {
+              console.error('[VendorIssueModule] Failed to persist filled missing OA/Batch to Firestore:', err);
+              try { localStorage.setItem('vendorIssueData', JSON.stringify(updatedIssues)); } catch {}
+            }
+          })();
+        } else {
+          try { localStorage.setItem('vendorIssueData', JSON.stringify(updatedIssues)); } catch {}
+        }
       }
     } catch (e) {
       console.error('[VendorIssueModule][FillMissing] Error reading PSIR:', e);
@@ -624,7 +707,19 @@ const VendorIssueModule: React.FC = () => {
     const dcNo = match && match.dcNo && String(match.dcNo).trim() !== '' ? match.dcNo : getNextDCNo(issues);
     const updated = [...issues, { ...newIssue, dcNo, issueNo: getNextIssueNo(issues) }];
     setIssues(updated);
-    try { persistVendorIssues(updated); } catch (err) { console.error('[VendorIssueModule] persistVendorIssues failed', err); }
+    if (userUid) {
+      (async () => {
+        try {
+          const last = updated[updated.length - 1];
+          if (last && !last.id) await addVendorIssue(userUid, last);
+        } catch (err) {
+          console.error('[VendorIssueModule] Failed to add Vendor Issue to Firestore:', err);
+          try { localStorage.setItem('vendorIssueData', JSON.stringify(updated)); } catch {}
+        }
+      })();
+    } else {
+      try { localStorage.setItem('vendorIssueData', JSON.stringify(updated)); } catch {}
+    }
     clearNewIssue(updated);
   };
 
@@ -654,7 +749,21 @@ const VendorIssueModule: React.FC = () => {
       idx === editIssueIdx ? { ...newIssue, dcNo } : issue
     );
     setIssues(updated);
-    try { persistVendorIssues(updated); } catch (err) { console.error('[VendorIssueModule] persistVendorIssues failed', err); }
+    if (userUid) {
+      (async () => {
+        try {
+          await Promise.all(updated.map(async (iss: any) => {
+            if (iss.id) await updateVendorIssue(userUid, iss.id, iss);
+            else await addVendorIssue(userUid, iss);
+          }));
+        } catch (err) {
+          console.error('[VendorIssueModule] Failed to persist updated Vendor Issue to Firestore:', err);
+          try { localStorage.setItem('vendorIssueData', JSON.stringify(updated)); } catch {}
+        }
+      })();
+    } else {
+      try { localStorage.setItem('vendorIssueData', JSON.stringify(updated)); } catch {}
+    }
     clearNewIssue(updated);
     setEditIssueIdx(null);
   };
@@ -921,11 +1030,11 @@ const VendorIssueModule: React.FC = () => {
                                   if (original.id) await deleteVendorIssue(userUid, original.id);
                                 }
                               } else {
-                                try { await persistVendorIssues(updated); } catch (err) { console.error('[VendorIssueModule] persistVendorIssues failed', err); }
+                                try { localStorage.setItem('vendorIssueData', JSON.stringify(updated)); } catch {}
                               }
                             } catch (err) {
                               console.error('[VendorIssueModule] Failed to persist delete/update to Firestore:', err);
-                              try { await persistVendorIssues(updated); } catch (err2) { console.error('[VendorIssueModule] persistVendorIssues fallback failed', err2); }
+                              try { localStorage.setItem('vendorIssueData', JSON.stringify(updated)); } catch {}
                             }
                           }, 0);
 
