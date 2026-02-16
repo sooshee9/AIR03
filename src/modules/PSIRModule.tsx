@@ -772,91 +772,102 @@ const PSIRModule: React.FC = () => {
   };
 
   const handleDeleteItem = async (psirIdx: number, itemIdx: number) => {
-    console.info('[PSIRModule] handleDeleteItem called:', { psirIdx, itemIdx, totalPsirs: psirs.length });
+    console.group('handleDeleteItem execution trace');
+    console.log('📍 Trace Step 1: Function entry');
+    console.log('   psirIdx:', psirIdx, 'itemIdx:', itemIdx, 'totalPsirs:', psirs.length);
     
     const target = psirs[psirIdx];
     
     // Validate PSIR exists
     if (!target) {
+      console.log('❌ Trace Step 2: PSIR not found at index', psirIdx);
       const debugInfo = generateDeleteDebugInfo(psirIdx, itemIdx, 'FAILED_PSIR_NOT_FOUND');
       setDeleteDebugInfo(debugInfo);
       setDeleteDebugOpen(true);
       console.error('[PSIRModule] Target PSIR not found at index', psirIdx);
+      console.groupEnd();
       alert('Error: Could not find PSIR record. Check debug panel.');
       return;
     }
+    console.log('✅ Trace Step 2: PSIR found at index', psirIdx);
 
     // Validate user is authenticated
     if (!userUid) {
+      console.log('❌ Trace Step 3: User not authenticated');
       const debugInfo = generateDeleteDebugInfo(psirIdx, itemIdx, 'FAILED_NOT_AUTHENTICATED');
       setDeleteDebugInfo(debugInfo);
       setDeleteDebugOpen(true);
       console.warn('[PSIRModule] Cannot delete: user not authenticated');
+      console.groupEnd();
       alert('Error: User not authenticated. Please sign in first.');
       return;
     }
+    console.log('✅ Trace Step 3: User authenticated -', userUid);
 
     // Validate PSIR has an ID
-    if (!(target as any).id) {
+    const psirId = (target as any).id;
+    if (!psirId) {
+      console.log('❌ Trace Step 4: PSIR has no ID');
       const debugInfo = generateDeleteDebugInfo(psirIdx, itemIdx, 'FAILED_NO_PSIR_ID');
       setDeleteDebugInfo(debugInfo);
       setDeleteDebugOpen(true);
       console.error('[PSIRModule] Target PSIR has no ID:', target);
+      console.groupEnd();
       alert('Error: PSIR record has no ID. Cannot delete. See debug panel.');
       return;
     }
+    console.log('✅ Trace Step 4: PSIR ID exists -', psirId);
 
     // Create updated PSIR with item removed
+    console.log('📍 Trace Step 5: Creating updated PSIR object');
     const updatedTarget = { 
       ...target, 
       items: target.items.filter((_, idx) => idx !== itemIdx) 
     };
+    console.log('   Remaining items after filter:', updatedTarget.items.length);
 
-    const psirId = (target as any).id;
     const isDeleting = updatedTarget.items.length === 0;
+    console.log('   Will delete entire PSIR?', isDeleting);
 
     try {
-      console.info('[PSIRModule] Starting delete operation:', {
-        psirId,
-        userUid,
-        itemIdx,
-        isDeleting,
-        remainingItems: updatedTarget.items.length
-      });
-
+      console.log('📍 Trace Step 6: Starting Firestore operation');
+      console.log('   Operation:', isDeleting ? 'deletePsir' : 'updatePsir');
+      
       if (isDeleting) {
-        console.log('[PSIRModule] Deleting entire PSIR:', psirId);
+        console.log('   Calling deletePsir with ID:', psirId);
         await deletePsir(psirId);
-        console.log('[PSIRModule] PSIR deleted successfully from Firestore:', psirId);
+        console.log('✅ Trace Step 6a: deletePsir completed successfully');
       } else {
-        console.log('[PSIRModule] Updating PSIR with remaining items:', psirId);
+        console.log('   Calling updatePsir with ID:', psirId);
         await updatePsir(psirId, updatedTarget);
-        console.log('[PSIRModule] PSIR updated successfully in Firestore:', psirId);
+        console.log('✅ Trace Step 6b: updatePsir completed successfully');
       }
 
+      console.log('📍 Trace Step 7: Setting success debug info');
       const successDebugInfo = generateDeleteDebugInfo(psirIdx, itemIdx, 'SUCCESS');
       setDeleteDebugInfo(successDebugInfo);
       setDeleteDebugOpen(true);
-      console.info('[PSIRModule] Delete operation complete. Waiting for subscription update...');
+      console.log('✅ Trace Step 7: All complete - waiting for Firestore subscription to update UI');
+      console.groupEnd();
     } catch (e) {
-      console.error('[PSIRModule] Failed to delete/update PSIR in Firestore:', {
-        error: e,
-        psirId,
-        userUid,
-        errorCode: (e as any)?.code,
-        errorMessage: (e as any)?.message
-      });
+      console.log('❌ Trace Step 6: ERROR during Firestore operation');
+      console.error('Error object:', e);
+      console.error('Error message:', (e as any)?.message);
+      console.error('Error code:', (e as any)?.code);
       
       const errorDebugInfo = generateDeleteDebugInfo(psirIdx, itemIdx, 'FAILED_FIRESTORE_ERROR', e);
       setDeleteDebugInfo(errorDebugInfo);
       setDeleteDebugOpen(true);
       
       const errorMsg = (e as any)?.message || String(e);
+      console.log('📍 Trace Step 7: Error handler - showing alert with message:', errorMsg);
+      
       if (errorMsg.includes('permission-denied') || errorMsg.includes('PERMISSION_DENIED')) {
         alert('Permission denied. Check Firestore security rules. See debug panel.');
       } else {
         alert('Error deleting item: ' + errorMsg + '. See debug panel for details.');
       }
+      console.groupEnd();
     }
   };
 
@@ -1844,13 +1855,25 @@ const PSIRModule: React.FC = () => {
                   <td>
                     <button onClick={() => handleEditPSIR(psirIdx)}>Edit</button>
                     <button onClick={async () => {
-                      console.info('[PSIRModule] Delete button clicked:', { psirIdx, itemIdx, psirId: psir.id });
+                      console.group('🗑️ DELETE BUTTON CLICKED');
+                      console.log('Step 1: Button click handler started');
+                      console.log('Indices:', { psirIdx, itemIdx });
+                      console.log('PSIR ID:', psir.id);
+                      console.log('Current user UID:', userUid);
+                      console.log('Total PSIRs in state:', psirs.length);
+                      console.groupEnd();
+                      
                       try {
+                        console.log('Step 2: Calling handleDeleteItem...');
                         await handleDeleteItem(psirIdx, itemIdx);
-                        console.info('[PSIRModule] Delete completed successfully');
+                        console.log('Step 3: handleDeleteItem completed successfully');
                       } catch (err) {
-                        console.error('[PSIRModule] Delete button error:', err);
-                        throw err;
+                        console.error('Step 3: ERROR in handleDeleteItem:', err);
+                        console.error('Error details:', {
+                          message: (err as any).message,
+                          code: (err as any).code,
+                          stack: (err as any).stack
+                        });
                       }
                     }}>Delete</button>
                     <button 

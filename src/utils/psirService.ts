@@ -57,14 +57,20 @@ export const subscribePsirs = (uid: string, cb: (docs: Array<PSIRDoc & { id: str
 };
 
 export const addPsir = async (uid: string, data: any) => {
+  console.log('[psirService.addPsir] Starting - uid:', uid);
   const ref = await addDoc(collection(db, 'psirs'), { ...data, userId: uid, createdAt: serverTimestamp() });
+  console.log('[psirService.addPsir] Success - new ID:', ref.id);
   return ref.id;
 };
 
 export const updatePsir = async (id: string, data: any) => {
+  console.log('[psirService.updatePsir] Starting - id:', id, 'data:', data);
   await updateDoc(doc(db, 'psirs', id), { ...data, updatedAt: serverTimestamp() });
+  console.log('[psirService.updatePsir] Success - updated ID:', id);
 };
 
 export const deletePsir = async (id: string) => {
+  console.log('[psirService.deletePsir] Starting - id:', id);
   await deleteDoc(doc(db, 'psirs', id));
+  console.log('[psirService.deletePsir] Success - deleted ID:', id);
 };
