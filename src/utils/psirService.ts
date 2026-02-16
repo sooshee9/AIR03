@@ -29,17 +29,19 @@ export const subscribePsirs = (uid: string, cb: (docs: Array<PSIRDoc & { id: str
         const docs = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
         // Sort client-side by createdAt descending
         docs.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
-        console.debug('[PSIRService] Fetched PSIRs (fallback query):', docs.length);
+        console.debug('[PSIRService] Fetched PSIRs (fallback query):', docs.length, 'records for user:', uid);
         cb(docs);
       }, (error2) => {
         console.error('[PSIRService] Even fallback query failed:', error2.code, error2.message);
+        console.error('[PSIRService] Fallback error for user:', uid);
         cb([]);
       });
     } else {
-      console.error('[PSIRService] subscribePsirs failed:', error.code, error.message);
+      console.error('[PSIRService] subscribePsirs failed (likely missing index):', error.code, error.message);
       console.error('[PSIRService] To fix: Create Firestore composite index on "psirs" collection:');
       console.error('[PSIRService]   - Field: userId (Ascending)');
       console.error('[PSIRService]   - Field: createdAt (Descending)');
+      console.error('[PSIRService] Query attempted for user:', uid);
       cb([]);
     }
   };
@@ -47,7 +49,7 @@ export const subscribePsirs = (uid: string, cb: (docs: Array<PSIRDoc & { id: str
   unsub = onSnapshot(qWithIndex, snap => {
     const docs = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
     docs.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
-    console.debug('[PSIRService] Fetched PSIRs (index query):', docs.length);
+    console.debug('[PSIRService] Fetched PSIRs (index query):', docs.length, 'records for user:', uid);
     cb(docs);
   }, handleIndexError);
   

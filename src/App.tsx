@@ -6,7 +6,7 @@ import StockModule from './modules/StockModule';
 import ItemMasterModule from './modules/ItemMasterModule';
 
 import React from 'react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 import LoginPage from './LoginPage';
 import SyncStatus from './components/SyncStatus';
@@ -19,7 +19,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import './App.css';
 import { useUserRole } from './hooks/useUserRole';
 import { useUserDataSync } from './hooks/useUserDataSync';
-
+import { runDataDiagnostics } from './utils/diagnostics';
 
 
 function App() {
@@ -29,6 +29,19 @@ function App() {
   const { userProfile: _userProfile } = useUserRole(user);
   // Hook to sync user data with Firestore (on login)
   useUserDataSync(user);
+
+  // Expose diagnostics function to window for console debugging
+  useEffect(() => {
+    (window as any).AcuDiagnostics = {
+      runDiagnostics: runDataDiagnostics,
+      help: () => {
+        console.info('Available diagnostics commands:');
+        console.info('  AcuDiagnostics.runDiagnostics() - Check all collections for data');
+        console.info('Usage: AcuDiagnostics.runDiagnostics()');
+      },
+    };
+    console.info('[App] Diagnostics available - type: AcuDiagnostics.runDiagnostics()');
+  }, []);
 
   // Build modules with user prop
   const modulesWithUser: Record<string, React.ReactElement> = {

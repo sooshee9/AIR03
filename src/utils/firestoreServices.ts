@@ -18,11 +18,17 @@ export const subscribePurchaseOrders = (uid: string, cb: (docs: any[]) => void) 
 
 export const getPurchaseOrders = async (uid: string) => {
   try {
+    if (!uid) {
+      console.warn('[FirestoreServices] getPurchaseOrders called with empty uid');
+      return [];
+    }
     const col = collection(db, 'users', uid, 'purchaseOrders');
     const snap = await getDocs(col);
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    console.debug('[FirestoreServices] getPurchaseOrders retrieved', data.length, 'records for user:', uid);
+    return data;
   } catch (error) {
-    logger.error('[FirestoreServices] Error getting purchaseOrders:', error);
+    console.error('[FirestoreServices] Error getting purchaseOrders for user', uid, ':', error);
     return [];
   }
 };

@@ -82,7 +82,11 @@ const PSIRModule: React.FC = () => {
   const [userUid, setUserUid] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => setUserUid(u ? u.uid : null));
+    const unsub = onAuthStateChanged(auth, (u) => {
+      const uid = u ? u.uid : null;
+      console.info('[PSIRModule] Auth state changed - userUid:', uid);
+      setUserUid(uid);
+    });
     return () => unsub();
   }, []);
 
@@ -120,15 +124,20 @@ const PSIRModule: React.FC = () => {
           console.debug('[PSIRModule] Skipping loadPurchaseOrders: no userUid');
           return;
         }
-        console.debug('[PSIRModule] Loading purchase orders for user:', userUid);
+        console.info('[PSIRModule] Starting purchase orders load for user:', userUid);
         const orders = await getPurchaseOrders(userUid);
-        console.debug('[PSIRModule] getPurchaseOrders returned:', orders);
+        console.debug('[PSIRModule] getPurchaseOrders returned:', {
+          isArray: Array.isArray(orders),
+          length: Array.isArray(orders) ? orders.length : 'N/A',
+          data: orders
+        });
         
         if (Array.isArray(orders)) {
-          console.debug('[PSIRModule][Init] Loaded', orders.length, 'purchase orders from Firestore');
+          console.info('[PSIRModule][Init] Loaded', orders.length, 'purchase orders from Firestore');
           setPurchaseOrders(orders as any as PurchaseOrder[]);
           if (orders.length > 0 && !newPSIR.poNo) {
             const latestOrder: any = orders[orders.length - 1];
+            console.debug('[PSIRModule] Auto-filling first PO:', latestOrder.poNo);
             setNewPSIR(prev => ({
               ...prev,
               poNo: latestOrder.poNo || '',
@@ -137,7 +146,7 @@ const PSIRModule: React.FC = () => {
             }));
           }
         } else {
-          console.warn('[PSIRModule][Init] getPurchaseOrders returned non-array:', typeof orders, orders);
+          console.error('[PSIRModule][Init] getPurchaseOrders returned non-array:', typeof orders);
         }
       } catch (e) {
         console.error('[PSIRModule][Init] Error loading purchaseOrders from Firestore:', e);
@@ -234,6 +243,7 @@ const PSIRModule: React.FC = () => {
   useEffect(() => {
     const loadData = async () => {
       try {
+        console.info('[PSIRModule] Starting data load for user:', userUid);
         const [itemMasterData, purchaseDataData, indentDataData, stockDataData] = await Promise.all([
           getItemMaster(userUid || ''),
           getPurchaseData(userUid || ''),
@@ -241,25 +251,40 @@ const PSIRModule: React.FC = () => {
           getStockRecords(userUid || ''),
         ]);
         
+        console.debug('[PSIRModule] Data load completed:', {
+          itemMasterCount: Array.isArray(itemMasterData) ? itemMasterData.length : 'not-array',
+          purchaseDataCount: Array.isArray(purchaseDataData) ? purchaseDataData.length : 'not-array',
+          indentDataCount: Array.isArray(indentDataData) ? indentDataData.length : 'not-array',
+          stockDataCount: Array.isArray(stockDataData) ? stockDataData.length : 'not-array',
+        });
+        
         if (Array.isArray(itemMasterData)) {
           setItemMaster(itemMasterData as any as { itemName: string; itemCode: string }[]);
           setItemNames((itemMasterData as any[]).map((item: any) => item.itemName).filter(Boolean));
           console.debug('[PSIRModule][Init] Loaded itemMaster from Firestore:', itemMasterData);
+        } else {
+          console.warn('[PSIRModule][Init] itemMasterData is not an array:', typeof itemMasterData);
         }
         
         if (Array.isArray(purchaseDataData)) {
           setPurchaseData(purchaseDataData);
-          console.debug('[PSIRModule][Init] Loaded purchaseData from Firestore:', purchaseDataData);
+          console.debug('[PSIRModule][Init] Loaded purchaseData from Firestore:', purchaseDataData.length, 'records');
+        } else {
+          console.warn('[PSIRModule][Init] purchaseDataData is not an array:', typeof purchaseDataData);
         }
 
         if (Array.isArray(indentDataData)) {
           setIndentData(indentDataData);
-          console.debug('[PSIRModule][Init] Loaded indentData from Firestore:', indentDataData);
+          console.debug('[PSIRModule][Init] Loaded indentData from Firestore:', indentDataData.length, 'records');
+        } else {
+          console.warn('[PSIRModule][Init] indentDataData is not an array:', typeof indentDataData);
         }
 
         if (Array.isArray(stockDataData)) {
           setStockRecords(stockDataData);
-          console.debug('[PSIRModule][Init] Loaded stockRecords from Firestore:', stockDataData);
+          console.debug('[PSIRModule][Init] Loaded stockRecords from Firestore:', stockDataData.length, 'records');
+        } else {
+          console.warn('[PSIRModule][Init] stockDataData is not an array:', typeof stockDataData);
         }
       } catch (e) {
         console.error('[PSIRModule][Init] Error loading initial data from Firestore:', e);
@@ -268,6 +293,8 @@ const PSIRModule: React.FC = () => {
 
     if (userUid) {
       loadData();
+    } else {
+      console.warn('[PSIRModule] Skipping data load - userUid is not set');
     }
   }, [userUid]);
 
