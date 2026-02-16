@@ -854,11 +854,24 @@ const PSIRModule: React.FC = () => {
         console.log('✅ Trace Step 6b: updatePsir completed successfully');
       }
 
+      console.log('📍 Trace Step 6c: Immediately updating local state (DON\'T WAIT FOR SUBSCRIPTION)');
+      // IMMEDIATELY update UI - don't wait for subscription callback
+      setPsirs(prevPsirs => {
+        const updated = prevPsirs.map((p, idx) => {
+          if (idx !== psirIdx) return p;
+          return updatedTarget;
+        });
+        const filtered = updated.filter(p => p.items.length > 0);
+        console.log('✅ Trace Step 6c: Local state updated - remaining PSIRs:', filtered.length);
+        try { bus.dispatchEvent(new CustomEvent('psir.updated', { detail: { psirs: filtered } })); } catch (err) {}
+        return filtered;
+      });
+
       console.log('📍 Trace Step 7: Setting success debug info');
       const successDebugInfo = generateDeleteDebugInfo(psirIdx, itemIdx, 'SUCCESS');
       setDeleteDebugInfo(successDebugInfo);
       setDeleteDebugOpen(true);
-      console.log('✅ Trace Step 7: All complete - waiting for Firestore subscription to update UI');
+      console.log('✅ Trace Step 7: UI updated immediately - subscription will confirm the delete');
       console.groupEnd();
     } catch (e) {
       console.log('❌ Trace Step 6: ERROR during Firestore operation');
