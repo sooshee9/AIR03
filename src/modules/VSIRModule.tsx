@@ -290,6 +290,42 @@ const VSIRModule: React.FC = () => {
 
   // Auto-import from purchaseData (Firebase only - NO localStorage)
   // Reusable import routine so manual and automatic can share the same logic
+  // Helpers to robustly detect PO number and item arrays from various purchase shapes
+  const getOrderPoNo = (order: any) => {
+    if (!order || typeof order !== 'object') return undefined;
+    const candidates = ['poNo', 'materialPurchasePoNo', 'po_no', 'poNumber', 'purchasePoNo', 'poNumberStr'];
+    for (const k of candidates) {
+      if (order[k]) return order[k];
+    }
+    // fallback: any key that looks like "po" and contains non-empty value
+    for (const k of Object.keys(order)) {
+      if (/po/i.test(k) && order[k]) return order[k];
+    }
+    return undefined;
+  };
+
+  const looksLikeItem = (obj: any) => {
+    if (!obj || typeof obj !== 'object') return false;
+    const keys = Object.keys(obj).map(k => k.toLowerCase());
+    return keys.includes('itemcode') || keys.includes('item_name') || keys.includes('itemname') || keys.includes('model') || keys.includes('code') || keys.includes('name');
+  };
+
+  const getOrderItems = (order: any) => {
+    if (!order || typeof order !== 'object') return [];
+    // common field names
+    const itemKeys = ['items', 'materials', 'products', 'lines', 'orderItems', 'itemsList'];
+    for (const k of itemKeys) {
+      if (Array.isArray(order[k]) && order[k].length > 0) return order[k];
+    }
+    // fallback: scan all values for the first array of item-like objects
+    for (const v of Object.values(order)) {
+      if (Array.isArray(v) && v.length > 0 && looksLikeItem(v[0])) return v;
+    }
+    // last resort: if order itself is an array-like container
+    if (Array.isArray(order) && order.length > 0 && looksLikeItem(order[0])) return order;
+    return [];
+  };
+
   const runImport = async (providedSource?: any[]) => {
     if (!userUid) {
       console.log('[VSIR] Manual import skipped: no userUid');
@@ -315,10 +351,12 @@ const VSIRModule: React.FC = () => {
 
       for (let orderIdx = 0; orderIdx < sourceData.length; orderIdx++) {
         const order: any = sourceData[orderIdx];
-        const poNo = order.poNo || order.materialPurchasePoNo;
+        const poNo = getOrderPoNo(order);
         console.log(`[VSIR] Processing order ${orderIdx}: poNo=${poNo}`);
         if (!poNo || existingPOs.has(String(poNo).trim())) { console.log('[VSIR]  skipping existing or invalid PO:', poNo); continue; }
-        if (!Array.isArray(order.items) || order.items.length === 0) { console.log('[VSIR]  skipping: no items'); continue; }
+
+        const items = getOrderItems(order);
+        if (!Array.isArray(items) || items.length === 0) { console.log('[VSIR]  skipping: no items (checked multiple keys)'); continue; }
 
         const vendorDeptMatch = vendorDeptOrders.find((v: any) => (v.materialPurchasePoNo || '').toString().trim() === poNo.toString().trim());
         const oaNo = vendorDeptMatch?.oaNo || '';
