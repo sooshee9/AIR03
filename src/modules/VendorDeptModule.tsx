@@ -2151,6 +2151,67 @@ const handleVSIRUpdate = (event?: any) => {
 					</button>
 				</div>
 
+				{editOrderIdx !== null && newOrder.items && newOrder.items.length > 0 && (
+					<div style={{ marginBottom: 16, border: '1px solid #2196f3', borderRadius: 4, padding: 8, background: '#e3f2fd' }}>
+						<h4 style={{ margin: '0 0 12px 0', color: '#1976d2' }}>Items in Current Order</h4>
+						<table border={1} cellPadding={6} style={{ width: '100%', fontSize: 12 }}>
+							<thead>
+								<tr style={{ background: '#1976d2', color: '#fff' }}>
+									<th>Item Name</th>
+									<th>Item Code</th>
+									<th>Material Issue No</th>
+									<th>Qty</th>
+									<th>Indent Status</th>
+									<th>Received Qty</th>
+									<th>OK Qty</th>
+									<th>Rework Qty</th>
+									<th>Rejected Qty</th>
+									<th>GRN No</th>
+									<th>Actions</th>
+								</tr>
+							</thead>
+							<tbody>
+								{newOrder.items.map((item, itemIdx) => (
+									<tr key={itemIdx}>
+										<td>{item.itemName || '—'}</td>
+										<td>{item.itemCode || '—'}</td>
+										<td>{item.materialIssueNo || '—'}</td>
+										<td>{item.qty || '—'}</td>
+										<td>{item.indentStatus || '—'}</td>
+										<td>{item.receivedQty || '—'}</td>
+										<td>{item.okQty || '—'}</td>
+										<td>{item.reworkQty || '—'}</td>
+										<td>{item.rejectedQty || '—'}</td>
+										<td>{item.grnNo || '—'}</td>
+										<td style={{ display: 'flex', gap: 4 }}>
+											<button
+												onClick={() => {
+													setItemInput(item);
+													setEditIdx({ orderIdx: 0, itemIdx });
+												}}
+												style={{ background: '#ff9800', color: '#fff', border: 'none', borderRadius: 3, padding: '4px 8px', cursor: 'pointer', fontSize: 11 }}
+											>
+												Edit
+											</button>
+											<button
+												onClick={() => {
+													setNewOrder(prev => ({
+														...prev,
+														items: prev.items.filter((_, idx) => idx !== itemIdx)
+													}));
+												}}
+												style={{ background: '#e53935', color: '#fff', border: 'none', borderRadius: 3, padding: '4px 8px', cursor: 'pointer', fontSize: 11 }}
+											>
+												Delete
+											</button>
+										</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					</div>
+				)}
+
 				<button onClick={editOrderIdx !== null ? handleUpdateOrder : handleAddOrder}>
 					{editOrderIdx !== null ? 'Update Vendor Dept Order' : 'Add Vendor Dept Order'}
 				</button>
