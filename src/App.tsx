@@ -20,7 +20,7 @@ import './App.css';
 import { useUserRole } from './hooks/useUserRole';
 import { useUserDataSync } from './hooks/useUserDataSync';
 import { runDataDiagnostics } from './utils/diagnostics';
-import { hardResetAllData, verifyDataCleared } from './utils/firestoreServices';
+import { hardResetAllData, verifyDataCleared, forceCleanupAllData } from './utils/firestoreServices';
 
 
 function App() {
@@ -75,13 +75,24 @@ function App() {
                 console.log('[App] Hard reset result:', resetResult);
                 
                 // Verify deletion
-                const verifyResult = await verifyDataCleared(user.uid);
+                let verifyResult = await verifyDataCleared(user.uid);
                 console.log('[App] Verification result:', verifyResult);
                 
+                // If data still exists, force cleanup
+                if (!verifyResult.allClear) {
+                  console.warn('[App] Data still exists after hard reset, attempting force cleanup...');
+                  await forceCleanupAllData(user.uid);
+                  
+                  // Verify again after force cleanup
+                  console.log('[App] Verifying again after force cleanup...');
+                  verifyResult = await verifyDataCleared(user.uid);
+                  console.log('[App] Second verification result:', verifyResult);
+                }
+                
                 if (verifyResult.allClear) {
-                  alert('✅ Hard reset completed! All data deleted except ItemMaster.\n\nRefreshing page...');
+                  alert('✅ All data successfully deleted! All collections verified empty.\n\nRefreshing page...');
                 } else {
-                  alert(`⚠️ Hard reset completed but verify shows:\n${Object.entries(verifyResult.results).map(([k, v]) => `${k}: ${v}`).join('\n')}\n\nRefreshing page anyway...`);
+                  alert(`⚠️ WARNING: Some data could not be deleted:\n${Object.entries(verifyResult.results).map(([k, v]) => `${k}: ${v}`).join('\n')}\n\nPlease check browser console for details.\n\nRefreshing page anyway...`);
                 }
                 
                 window.location.reload();

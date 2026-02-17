@@ -505,11 +505,17 @@ export const verifyDataCleared = async (uid: string) => {
     ];
     
     const verificationResults: Record<string, number> = {};
+    const detailedResults: Record<string, any[]> = {};
     
     for (const collectionName of collectionsToCheck) {
       const col = collection(db, 'users', uid, collectionName);
       const snap = await getDocs(col);
       verificationResults[collectionName] = snap.docs.length;
+      
+      if (snap.docs.length > 0) {
+        detailedResults[collectionName] = snap.docs.map(d => ({ id: d.id, data: d.data() }));
+        console.error(`[FirestoreServices] ⚠️ Found ${snap.docs.length} remaining docs in ${collectionName}:`, detailedResults[collectionName]);
+      }
     }
     
     // Check PSIRs
@@ -518,14 +524,97 @@ export const verifyDataCleared = async (uid: string) => {
     const psirSnap = await getDocs(q);
     verificationResults['psirs'] = psirSnap.docs.length;
     
+    if (psirSnap.docs.length > 0) {
+      detailedResults['psirs'] = psirSnap.docs.map(d => ({ id: d.id, data: d.data() }));
+      console.error(`[FirestoreServices] ⚠️ Found ${psirSnap.docs.length} remaining PSIRs:`, detailedResults['psirs']);
+    }
+    
     const allClear = Object.values(verificationResults).every(count => count === 0);
     
     console.log('[FirestoreServices] ✅ Verification results:', verificationResults);
     console.log(`[FirestoreServices] All data cleared: ${allClear}`);
     
-    return { allClear, results: verificationResults };
+    if (!allClear) {
+      console.error('[FirestoreServices] ⚠️ WARNING: Some data was not deleted! Details:', detailedResults);
+    }
+    
+    return { allClear, results: verificationResults, detailedResults };
   } catch (error) {
     console.error('[FirestoreServices] Error verifying data:', error);
-    return { allClear: false, results: {}, error: String(error) };
+    return { allClear: false, results: {}, detailedResults: {}, error: String(error) };
+  }
+};
+
+// Aggressive cleanup - forces deletion of all remaining data
+export const forceCleanupAllData = async (uid: string) => {
+  try {
+    console.log('[FirestoreServices] Starting FORCE CLEANUP...');
+    
+    const collectionsToDelete = [
+      'vendorIssues',
+      'vsirRecords',
+      'purchaseOrders',
+      'vendorDepts',
+      'indents'
+    ];
+    
+    const forceCleanupResults: Record<string, number> = {};
+    
+    // Force delete all docs with batch operations
+    for (const collectionName of collectionsToDelete) {
+      try {
+        const col = collection(db, 'users', uid, collectionName);
+        const snap = await getDocs(col);
+        
+        console.log(`[FirestoreServices] Force cleaning ${collectionName}: ${snap.docs.length} docs found`);
+        
+        let deletedCount = 0;
+        for (const doc of snap.docs) {
+          try {
+            await deleteDoc(doc.ref);
+            deletedCount++;
+            console.log(`[FirestoreServices]   Deleted ${collectionName}/${doc.id}`);
+          } catch (err) {
+            console.error(`[FirestoreServices]   Failed to delete ${collectionName}/${doc.id}:`, err);
+          }
+        }
+        
+        forceCleanupResults[collectionName] = deletedCount;
+      } catch (err) {
+        console.error(`[FirestoreServices] Error force cleaning ${collectionName}:`, err);
+        forceCleanupResults[collectionName] = 0;
+      }
+    }
+    
+    // Force cleanup PSIRs
+    try {
+      const psirCol = collection(db, 'psirs');
+      const q = query(psirCol, where('userId', '==', uid));
+      const snap = await getDocs(q);
+      
+      console.log(`[FirestoreServices] Force cleaning PSIRs: ${snap.docs.length} docs found`);
+      
+      let deletedCount = 0;
+      for (const doc of snap.docs) {
+        try {
+          await deleteDoc(doc.ref);
+          deletedCount++;
+          console.log(`[FirestoreServices]   Deleted psirs/${doc.id}`);
+        } catch (err) {
+          console.error(`[FirestoreServices]   Failed to delete psirs/${doc.id}:`, err);
+        }
+      }
+      
+      forceCleanupResults['psirs'] = deletedCount;
+    } catch (err) {
+      console.error('[FirestoreServices] Error force cleaning PSIRs:', err);
+      forceCleanupResults['psirs'] = 0;
+    }
+    
+    console.log('[FirestoreServices] ✅ Force cleanup completed:', forceCleanupResults);
+    return { success: true, forceCleanupResults };
+  } catch (error) {
+    console.error('[FirestoreServices] Fatal error during force cleanup:', error);
+    throw error;
   }
 }
