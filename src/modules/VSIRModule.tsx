@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../firebase';
 import { subscribePsirs } from '../utils/psirService';
-import { subscribeVSIRRecords, addVSIRRecord, updateVSIRRecord, deleteVSIRRecord, subscribeVendorDepts, getItemMaster, getVendorIssues, subscribePurchaseData } from '../utils/firestoreServices';
+import { subscribeVSIRRecords, addVSIRRecord, updateVSIRRecord, deleteVSIRRecord, subscribeVendorDepts, getItemMaster, getVendorIssues, subscribePurchaseData, subscribePurchaseOrders } from '../utils/firestoreServices';
 import bus from '../utils/eventBus';
 
 interface VSRIRecord {
@@ -75,6 +75,7 @@ const VSIRModule: React.FC = () => {
   const [vendorDeptOrders, setVendorDeptOrders] = useState<any[]>([]);
   const [vendorIssues, setVendorIssues] = useState<any[]>([]);
   const [purchaseData, setPurchaseData] = useState<any[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
   const [psirData, setPsirData] = useState<any[]>([]);
   const [userUid, setUserUid] = useState<string | null>(null);
 
@@ -110,8 +111,20 @@ const VSIRModule: React.FC = () => {
 
         // subscribe to purchaseData in real-time (for auto-import)
         const unsubPurchaseData = subscribePurchaseData(uid, (docs) => {
-          console.debug('[VSIR] Purchase data updated:', docs.length, 'records');
+          console.log('[VSIR] ✅ Purchase data subscription updated:', docs.length, 'records');
+          if (docs.length > 0) {
+            console.log('[VSIR] First purchase data entry:', docs[0]);
+          }
           setPurchaseData(docs || []);
+        });
+
+        // subscribe to purchaseOrders in real-time (alternative source)
+        const unsubPurchaseOrders = subscribePurchaseOrders(uid, (docs) => {
+          console.log('[VSIR] ✅ Purchase orders subscription updated:', docs.length, 'records');
+          if (docs.length > 0) {
+            console.log('[VSIR] First purchase order entry:', docs[0]);
+          }
+          setPurchaseOrders(docs || []);
         });
 
         // load one-time master collections
@@ -130,6 +143,7 @@ const VSIRModule: React.FC = () => {
           try { if (unsubVendorDepts) unsubVendorDepts(); } catch {}
           try { if (unsubPsirs) unsubPsirs(); } catch {}
           try { if (unsubPurchaseData) unsubPurchaseData(); } catch {}
+          try { if (unsubPurchaseOrders) unsubPurchaseOrders(); } catch {}
         };
       });
 
@@ -276,34 +290,84 @@ const VSIRModule: React.FC = () => {
 
   // Auto-import from purchaseData (Firebase only - NO localStorage)
   useEffect(() => {
-    if (!userUid || !Array.isArray(purchaseData) || purchaseData.length === 0) {
-      return; // Wait for userUid and purchase data
+    if (!userUid) {
+      console.log('[VSIR] Auto-import skipped: no userUid');
+      return;
     }
+
+    // Try to use purchaseOrders first, fall back to purchaseData
+    const sourceData = (Array.isArray(purchaseOrders) && purchaseOrders.length > 0) ? purchaseOrders : purchaseData;
+
+    if (!Array.isArray(sourceData)) {
+      console.log('[VSIR] Auto-import skipped: source data is not an array', typeof sourceData);
+      return;
+    }
+
+    if (sourceData.length === 0) {
+      console.log('[VSIR] Auto-import skipped: both purchaseOrders and purchaseData are empty');
+      return;
+    }
+
+    console.log('[VSIR] ========== AUTO-IMPORT STARTING ==========');
+    console.log('[VSIR] Using source:', Array.isArray(purchaseOrders) && purchaseOrders.length > 0 ? 'purchaseOrders' : 'purchaseData');
+    console.log('[VSIR] userUid:', userUid);
+    console.log('[VSIR] Current VSIR records:', records.length);
+    console.log('[VSIR] Source data entries:', sourceData.length);
+    console.log('[VSIR] Source data sample:', sourceData[0]);
 
     try {
       // Check which POs already have VSIR records
       const existingPOs = new Set(records.map(r => r.poNo));
-      console.log('[VSIR] Auto-import starting. Current records:', records.length, 'Purchase orders:', purchaseData.length);
+      console.log('[VSIR] Existing POs:', Array.from(existingPOs));
 
-      purchaseData.forEach((order: any) => {
-        if (!order.poNo || existingPOs.has(order.poNo) || !Array.isArray(order.items)) return;
+      let importCount = 0;
+      sourceData.forEach((order: any, orderIdx: number) => {
+        const poNo = order.poNo || order.materialPurchasePoNo;
+        console.log(`[VSIR] Processing order ${orderIdx}:`, {
+          poNo,
+          hasItems: Array.isArray(order.items),
+          itemsCount: order.items?.length || 0,
+          alreadyExists: existingPOs.has(poNo)
+        });
+
+        if (!poNo) {
+          console.log('[VSIR]   Skipping: no poNo');
+          return;
+        }
+        if (existingPOs.has(poNo)) {
+          console.log('[VSIR]   Skipping: PO already has VSIR records');
+          return;
+        }
+        if (!Array.isArray(order.items)) {
+          console.log('[VSIR]   Skipping: items is not an array', typeof order.items);
+          return;
+        }
+        if (order.items.length === 0) {
+          console.log('[VSIR]   Skipping: no items in order');
+          return;
+        }
 
         // Get matching VendorDept order for OA and Batch info
         let oaNo = '';
         let batchNo = '';
-        const vendorDeptMatch = vendorDeptOrders.find((v: any) => v.materialPurchasePoNo === order.poNo);
+        const vendorDeptMatch = vendorDeptOrders.find((v: any) => v.materialPurchasePoNo === poNo);
         if (vendorDeptMatch) {
           oaNo = vendorDeptMatch.oaNo || '';
           batchNo = vendorDeptMatch.batchNo || '';
+          console.log('[VSIR]   Found matching VendorDept:', { oaNo, batchNo });
+        } else {
+          console.log('[VSIR]   No matching VendorDept order');
         }
 
         // Create VSIR record for each item in the purchase order
-        order.items.forEach((item: any) => {
+        order.items.forEach((item: any, itemIdx: number) => {
+          console.log(`[VSIR]     Processing item ${itemIdx}:`, { itemName: item.itemName, itemCode: item.itemCode, qty: item.qty });
+
           const newRecord: VSRIRecord = {
             id: Date.now() + Math.floor(Math.random() * 10000),
             receivedDate: '',
             indentNo: '',
-            poNo: order.poNo,
+            poNo,
             oaNo,
             purchaseBatchNo: batchNo,
             vendorBatchNo: '',
@@ -323,17 +387,20 @@ const VSIRModule: React.FC = () => {
           // Save to Firebase
           addVSIRRecord(userUid, newRecord)
             .then(() => {
-              console.debug('[VSIR] ✅ Record auto-imported to Firebase for PO:', order.poNo, 'Item:', item.itemCode);
+              importCount++;
+              console.log('[VSIR]       ✅ Saved to Firebase');
             })
             .catch((error) => {
-              console.error('[VSIR] ❌ Error saving record for PO', order.poNo, ':', error);
+              console.error('[VSIR]       ❌ Error saving:', error);
             });
         });
       });
+      console.log('[VSIR] Auto-import complete. Records to be imported:', importCount);
+      console.log('[VSIR] ==========================================');
     } catch (e) {
       console.error('[VSIR] Error in auto-import:', e);
     }
-  }, [purchaseData, vendorDeptOrders, records, userUid]);
+  }, [purchaseOrders, purchaseData, vendorDeptOrders, records, userUid]);
 
   // Fill missing OA/Batch from PSIR/VendorDept (once)
   useEffect(() => {
