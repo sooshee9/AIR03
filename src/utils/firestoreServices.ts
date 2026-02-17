@@ -78,6 +78,37 @@ export const getVendorDepts = async (uid: string) => {
   }
 };
 
+export const addVendorDept = async (uid: string, data: any) => {
+  try {
+    const col = collection(db, 'users', uid, 'vendorDepts');
+    const ref = await addDoc(col, { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    return ref.id;
+  } catch (error) {
+    logger.error('[FirestoreServices] Error adding vendorDept:', error);
+    throw error;
+  }
+};
+
+export const updateVendorDept = async (uid: string, docId: string, data: any) => {
+  try {
+    const docRef = doc(db, 'users', uid, 'vendorDepts', docId);
+    await updateDoc(docRef, { ...data, updatedAt: serverTimestamp() });
+  } catch (error) {
+    logger.error('[FirestoreServices] Error updating vendorDept:', error);
+    throw error;
+  }
+};
+
+export const deleteVendorDept = async (uid: string, docId: string) => {
+  try {
+    const docRef = doc(db, 'users', uid, 'vendorDepts', docId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    logger.error('[FirestoreServices] Error deleting vendorDept:', error);
+    throw error;
+  }
+};
+
 // ============ VENDOR ISSUES ============
 export const subscribeVendorIssues = (uid: string, cb: (docs: any[]) => void) => {
   const col = collection(db, 'users', uid, 'vendorIssues');

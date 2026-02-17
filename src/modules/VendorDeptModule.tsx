@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import bus from '../utils/eventBus';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../firebase';
-import { getPurchaseOrders, getPurchaseData } from '../utils/firestoreServices';
+import { getPurchaseOrders, getPurchaseData, subscribeVendorDepts, addVendorDept, updateVendorDept, deleteVendorDept } from '../utils/firestoreServices';
 import { subscribeVSIRRecords } from '../utils/firestoreServices';
 import { subscribePsirs } from '../utils/psirService';
 
@@ -23,6 +23,7 @@ interface VendorDeptItem {
 }
 
 interface VendorDeptOrder {
+	id?: string;
 	orderPlaceDate: string;
 	materialPurchasePoNo: string;
 	oaNo: string;
@@ -321,6 +322,23 @@ const VendorDeptModule: React.FC = () => {
 		});
 		return () => unsub();
 	}, []);
+
+	// Subscribe to vendorDepts from Firestore in real-time
+	useEffect(() => {
+		let unsub: (() => void) | null = null;
+		if (!userUid) {
+			console.debug('[VendorDeptModule] Skipping vendorDepts subscription - no userUid');
+			return;
+		}
+		console.debug('[VendorDeptModule] Setting up vendorDepts subscription for userId:', userUid);
+		unsub = subscribeVendorDepts(userUid, (docs) => {
+			console.info('[VendorDeptModule] ✓ Loaded', docs.length, 'vendor dept orders from Firebase');
+			setOrders(docs);
+		});
+		return () => {
+			if (unsub) unsub();
+		};
+	}, [userUid]);
 
 	// Load purchase orders, purchase data, VSIR, and PSIR from Firestore
 	useEffect(() => {
@@ -980,16 +998,73 @@ useEffect(() => {
 		setItemInput({ itemName: '', itemCode: '', materialIssueNo: '', qty: 0, closingStock: '', indentStatus: '', receivedQty: 0, okQty: 0, reworkQty: 0, rejectedQty: 0, grnNo: '', debitNoteOrQtyReturned: '', remarks: '' });
 	};
 
-	const [editItemIdx, setEditItemIdx] = useState<number | null>(null);
-
-	const handleDeleteCurrentItem = (idx: number) => {
-		setNewOrder(prev => ({ ...prev, items: prev.items.filter((_, i) => i !== idx) }));
-		if (editItemIdx === idx) {
-			setEditItemIdx(null);
-			setItemInput({ itemName: '', itemCode: '', materialIssueNo: '', qty: 0, closingStock: '', indentStatus: '', receivedQty: 0, okQty: 0, reworkQty: 0, rejectedQty: 0, grnNo: '', debitNoteOrQtyReturned: '', remarks: '' });
+	const handleDeleteOrder = (idx: number) => {
+		if (!userUid || !orders[idx]?.id) {
+			alert('Error: Cannot delete order - user or order ID is missing');
+			return;
 		}
+		
+		if (!window.confirm('Are you sure you want to delete this order?')) {
+			return;
+		}
+		
+		const docId = orders[idx].id;
+		deleteVendorDept(userUid, docId)
+			.then(() => {
+				console.log('[VendorDeptModule] ✓ Order deleted from Firebase');
+				setOrders(prevOrders => prevOrders.filter((_, oIdx) => oIdx !== idx));
+			})
+			.catch((err) => {
+				console.error('[VendorDeptModule] ✗ Error deleting order from Firebase:', err);
+				alert('Error deleting order. Please try again.');
+			});
 	};
-	void handleDeleteCurrentItem; 
+
+	const handleDeleteItem = (orderIdx: number, itemIdx: number) => {
+		if (!userUid || !orders[orderIdx]?.id) {
+			alert('Error: Cannot delete item - user or order ID is missing');
+			return;
+		}
+		
+		if (!window.confirm('Are you sure you want to delete this item?')) {
+			return;
+		}
+		
+		const docId = orders[orderIdx].id;
+		const updatedOrder = {
+			...orders[orderIdx],
+			items: orders[orderIdx].items.filter((_, idx) => idx !== itemIdx)
+		};
+		
+		// If no items left, delete the entire order
+		if (updatedOrder.items.length === 0) {
+			deleteVendorDept(userUid, docId)
+				.then(() => {
+					console.log('[VendorDeptModule] ✓ Order deleted from Firebase (all items removed)');
+					setOrders(prevOrders => prevOrders.filter((_, oIdx) => oIdx !== orderIdx));
+				})
+				.catch((err) => {
+					console.error('[VendorDeptModule] ✗ Error deleting order from Firebase:', err);
+					alert('Error deleting order. Please try again.');
+				});
+		} else {
+			// Update the order with remaining items
+			const { id, ...updateData } = updatedOrder;
+			updateVendorDept(userUid, docId, updateData)
+				.then(() => {
+					console.log('[VendorDeptModule] ✓ Item deleted and order updated in Firebase');
+					setOrders(prevOrders =>
+						prevOrders
+							.map((o, oIdx) => oIdx === orderIdx ? updatedOrder : o)
+							.filter(o => o.items.length > 0)
+					);
+				})
+				.catch((err) => {
+					console.error('[VendorDeptModule] ✗ Error updating order in Firebase:', err);
+					alert('Error deleting item. Please try again.');
+				});
+		}
+	}; 
 
 	const handleAddOrder = () => {
 		// Debug: log the new order before saving
@@ -1053,43 +1128,29 @@ useEffect(() => {
 			items: newOrder.items,
 		};
 		console.log('[VendorDeptModule] Order to save with batchNo:', orderToSave);
-		const updated = [...orders, orderToSave];
-		console.log('[VendorDeptModule] Updated orders array:', updated);
-		setOrders(updated);
 		
-		// DIRECTLY update VSIR records with the vendorBatchNo
-		try {
-			if (vsirRecords && Array.isArray(vsirRecords)) {
-				console.log('[VendorDeptModule] Syncing vendorBatchNo to VSIR for PO:', orderToSave.materialPurchasePoNo);
-				const updatedVsirRecords = vsirRecords.map((record: any) => {
-					// Match VSIR record by PO number (normalized comparison)
-					const recordPoNo = String(record.poNo || '').trim();
-					const orderPoNo = String(orderToSave.materialPurchasePoNo || '').trim();
-					if (recordPoNo === orderPoNo) {
-						console.log('[VendorDeptModule] ✓ VSIR record matched for PO', orderPoNo, '- updating vendorBatchNo:', orderToSave.vendorBatchNo);
-						return { ...record, vendorBatchNo: orderToSave.vendorBatchNo };
+		// Save to Firebase
+		if (userUid) {
+			addVendorDept(userUid, orderToSave)
+				.then(() => {
+					console.log('[VendorDeptModule] ✓ Order saved to Firebase');
+					// Dispatch event for VSIR sync
+					try {
+						bus.dispatchEvent(new CustomEvent('vendorDept.updated', { detail: { vendorDeptData: [orderToSave] } }));
+						console.log('[VendorDeptModule] Dispatched vendorDept.updated event for VSIR sync');
+					} catch (err) {
+						console.error('[VendorDeptModule] Error dispatching vendorDept.updated event:', err);
 					}
-					return record;
+					clearNewOrder();
+				})
+				.catch((err) => {
+					console.error('[VendorDeptModule] ✗ Error saving order to Firebase:', err);
+					alert('Error saving order. Please try again.');
 				});
-				console.log('[VendorDeptModule] VSIR records updated');
-				// Dispatch event so VSIR component knows about the update
-				try {
-					bus.dispatchEvent(new CustomEvent('vsir.records.synced', { detail: { records: updatedVsirRecords } }));
-				} catch {}
-			}
-		} catch (err) {
-			console.error('[VendorDeptModule] Error syncing to VSIR:', err);
+		} else {
+			console.error('[VendorDeptModule] ✗ Cannot save order - userUid is not set');
+			alert('Error: User not authenticated');
 		}
-		
-		// Dispatch event so VSIR can sync the vendorBatchNo (legacy event for safety)
-		try {
-			bus.dispatchEvent(new CustomEvent('vendorDept.updated', { detail: { vendorDeptData: updated } }));
-			console.log('[VendorDeptModule] Dispatched vendorDept.updated event for VSIR sync');
-		} catch (err) {
-			console.error('[VendorDeptModule] Error dispatching vendorDept.updated event:', err);
-		}
-		
-		clearNewOrder();
 	};
 
 	const [editOrderIdx, setEditOrderIdx] = useState<number | null>(null);
@@ -1138,18 +1199,33 @@ useEffect(() => {
 		console.log('[DEBUG][VendorDeptModule] batchNo value:', newOrder.batchNo);
 
 		const updated = orders.map((order, idx) => idx === editOrderIdx ? newOrder : order);
-		setOrders(updated);
 		
-		// Dispatch event so Purchase Module can sync
-		try {
-			bus.dispatchEvent(new CustomEvent('vendorDept.updated', { detail: { vendorDeptData: updated } }));
-			console.log('[VendorDeptModule] Dispatched vendorDept.updated event');
-		} catch (err) {
-			console.error('[VendorDeptModule] Error dispatching vendorDept.updated event:', err);
+		// Update to Firebase
+		if (userUid && orders[editOrderIdx]?.id) {
+			const docId = orders[editOrderIdx].id;
+			// Prepare update data (remove id field since Firebase doesn't need it)
+			const { id, ...updateData } = newOrder;
+			updateVendorDept(userUid, docId, updateData)
+				.then(() => {
+					console.log('[VendorDeptModule] ✓ Order updated in Firebase');
+					// Dispatch event so other modules can sync
+					try {
+						bus.dispatchEvent(new CustomEvent('vendorDept.updated', { detail: { vendorDeptData: updated } }));
+						console.log('[VendorDeptModule] Dispatched vendorDept.updated event');
+					} catch (err) {
+						console.error('[VendorDeptModule] Error dispatching vendorDept.updated event:', err);
+					}
+					clearNewOrder();
+					setEditOrderIdx(null);
+				})
+				.catch((err) => {
+					console.error('[VendorDeptModule] ✗ Error updating order in Firebase:', err);
+					alert('Error updating order. Please try again.');
+				});
+		} else {
+			console.error('[VendorDeptModule] ✗ Cannot update order - userUid or docId is missing');
+			alert('Error: User not authenticated or order ID is missing');
 		}
-		
-		clearNewOrder();
-		setEditOrderIdx(null);
 	};
 
 	const handleSaveItem = () => {
@@ -2398,13 +2474,7 @@ const handleVSIRUpdate = (event?: any) => {
 										<td>{order.vendorName}</td>
 										<td colSpan={13} style={{ textAlign: 'center', color: '#888' }}>(No items)</td>
 										<td><button style={{ background: '#1976d2', color: '#fff', border: 'none', borderRadius: 4, padding: '4px 12px', cursor: 'pointer' }} onClick={() => handleEditOrder(idx)}>Edit</button></td>
-										<td><button onClick={() => {
-											setOrders(prevOrders => {
-												const updatedOrders = prevOrders.filter((_, oIdx) => oIdx !== idx);
-												localStorage.setItem('vendorDeptData', JSON.stringify(updatedOrders));
-												return updatedOrders;
-											});
-										}} style={{ background: '#e53935', color: '#fff', border: 'none', borderRadius: 4, padding: '4px 12px', cursor: 'pointer' }}>Delete</button></td>
+										<td><button onClick={() => handleDeleteOrder(idx)} style={{ background: '#e53935', color: '#fff', border: 'none', borderRadius: 4, padding: '4px 12px', cursor: 'pointer' }}>Delete</button></td>
 									</tr>
 								);
 							}
@@ -2443,16 +2513,7 @@ const handleVSIRUpdate = (event?: any) => {
 									<td>{item.debitNoteOrQtyReturned}</td>
 									<td>{item.remarks}</td>
 									<td><button style={{ background: '#1976d2', color: '#fff', border: 'none', borderRadius: 4, padding: '4px 12px', cursor: 'pointer' }} onClick={() => handleEditOrder(idx)}>Edit</button></td>
-									<td><button onClick={() => {
-										setOrders(prevOrders => {
-											const updatedOrders = prevOrders.map((o, oIdx) => {
-												if (oIdx !== idx) return o;
-												return { ...o, items: o.items.filter((_, itemIdx) => itemIdx !== i) };
-											}).filter(o => o.items.length > 0);
-											localStorage.setItem('vendorDeptData', JSON.stringify(updatedOrders));
-											return updatedOrders;
-										});
-									}} style={{ background: '#e53935', color: '#fff', border: 'none', borderRadius: 4, padding: '4px 12px', cursor: 'pointer' }}>Delete</button></td>
+									<td><button onClick={() => handleDeleteItem(idx, i)} style={{ background: '#e53935', color: '#fff', border: 'none', borderRadius: 4, padding: '4px 12px', cursor: 'pointer' }}>Delete</button></td>
 								</tr>
 							));
 						})}
