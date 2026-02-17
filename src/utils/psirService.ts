@@ -32,45 +32,62 @@ export const subscribePsirs = (uid: string, cb: (docs: Array<PSIRDoc & { id: str
         docs.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
         
         // Deduplicate by indentNo only (keep records with BOTH PO No AND Supplier Name)
-        const seenByIndent = new Map<string, any>();
+        // Only remove incomplete duplicates if count > 1 for that Indent No
+        const seenByIndent = new Map<string, any[]>();
         const dedupLog: string[] = [];
         const origLength = docs.length;
         
+        // First pass: group by indentNo
         docs.forEach(doc => {
           const indentNo = doc.indentNo || 'MISSING';
-          const hasPoNo = !!doc.poNo && doc.poNo.trim() !== '';
-          const hasSupplierName = !!doc.supplierName && doc.supplierName.trim() !== '';
-          const isComplete = hasPoNo && hasSupplierName;
-          
           if (!seenByIndent.has(indentNo)) {
-            seenByIndent.set(indentNo, doc);
-            dedupLog.push(`✅ Keep: Indent ${indentNo} (id: ${doc.id}, complete: ${isComplete})`);
+            seenByIndent.set(indentNo, []);
+          }
+          seenByIndent.get(indentNo)!.push(doc);
+        });
+        
+        // Second pass: deduplicate within each group
+        const deduped: any[] = [];
+        seenByIndent.forEach((groupDocs, indentNo) => {
+          if (groupDocs.length === 1) {
+            // Single record - always keep, even if incomplete
+            deduped.push(groupDocs[0]);
+            dedupLog.push(`✅ Keep: Indent ${indentNo} (id: ${groupDocs[0].id}) - only record`);
           } else {
-            const existing = seenByIndent.get(indentNo);
-            const existingComplete = (!!existing.poNo && existing.poNo.trim() !== '') && 
-                                      (!!existing.supplierName && existing.supplierName.trim() !== '');
+            // Multiple records - keep complete, skip incomplete
+            const completeRecords = groupDocs.filter(doc => 
+              (!!doc.poNo && doc.poNo.trim() !== '') && 
+              (!!doc.supplierName && doc.supplierName.trim() !== '')
+            );
             
-            if (isComplete && !existingComplete) {
-              // New record is complete, old is not - replace
-              dedupLog.push(`🔄 Replace: Indent ${indentNo} (old id: ${existing.id} - incomplete, new id: ${doc.id} - complete)`);
-              seenByIndent.set(indentNo, doc);
-            } else if (isComplete && existingComplete) {
-              // Both complete - keep most recent
-              const existingTime = existing.createdAt?.toMillis?.() || 0;
-              const newTime = doc.createdAt?.toMillis?.() || 0;
-              if (newTime > existingTime) {
-                dedupLog.push(`🔄 Replace: Indent ${indentNo} (old id: ${existing.id}, new id: ${doc.id} - newer)`);
-                seenByIndent.set(indentNo, doc);
-              } else {
-                dedupLog.push(`❌ Skip: Indent ${indentNo} (id: ${doc.id} - older duplicate)`);
-              }
+            if (completeRecords.length > 0) {
+              // Keep most recent complete record
+              completeRecords.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+              const kept = completeRecords[0];
+              deduped.push(kept);
+              dedupLog.push(`✅ Keep: Indent ${indentNo} (id: ${kept.id}) - complete record`);
+              
+              // Log removed ones
+              groupDocs.forEach(doc => {
+                if (doc.id !== kept.id) {
+                  dedupLog.push(`❌ Remove: Indent ${indentNo} (id: ${doc.id}) - duplicate or incomplete`);
+                }
+              });
             } else {
-              // New is incomplete or both incomplete - skip new
-              dedupLog.push(`❌ Skip: Indent ${indentNo} (id: ${doc.id} - incomplete)`);
+              // All incomplete - keep most recent
+              groupDocs.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+              const kept = groupDocs[0];
+              deduped.push(kept);
+              dedupLog.push(`✅ Keep: Indent ${indentNo} (id: ${kept.id}) - most recent (all incomplete)`);
+              
+              groupDocs.slice(1).forEach(doc => {
+                dedupLog.push(`❌ Remove: Indent ${indentNo} (id: ${doc.id}) - older incomplete duplicate`);
+              });
             }
           }
         });
-        docs = Array.from(seenByIndent.values());
+        
+        docs = deduped;
         docs.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
         
         const removedCount = origLength - docs.length;
@@ -98,45 +115,62 @@ export const subscribePsirs = (uid: string, cb: (docs: Array<PSIRDoc & { id: str
     docs.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
     
     // Deduplicate by indentNo only (keep records with BOTH PO No AND Supplier Name)
-    const seenByIndent = new Map<string, any>();
+    // Only remove incomplete duplicates if count > 1 for that Indent No
+    const seenByIndent = new Map<string, any[]>();
     const dedupLog: string[] = [];
     const origLength = docs.length;
     
+    // First pass: group by indentNo
     docs.forEach(doc => {
       const indentNo = doc.indentNo || 'MISSING';
-      const hasPoNo = !!doc.poNo && doc.poNo.trim() !== '';
-      const hasSupplierName = !!doc.supplierName && doc.supplierName.trim() !== '';
-      const isComplete = hasPoNo && hasSupplierName;
-      
       if (!seenByIndent.has(indentNo)) {
-        seenByIndent.set(indentNo, doc);
-        dedupLog.push(`✅ Keep: Indent ${indentNo} (id: ${doc.id}, complete: ${isComplete})`);
+        seenByIndent.set(indentNo, []);
+      }
+      seenByIndent.get(indentNo)!.push(doc);
+    });
+    
+    // Second pass: deduplicate within each group
+    const deduped: any[] = [];
+    seenByIndent.forEach((groupDocs, indentNo) => {
+      if (groupDocs.length === 1) {
+        // Single record - always keep, even if incomplete
+        deduped.push(groupDocs[0]);
+        dedupLog.push(`✅ Keep: Indent ${indentNo} (id: ${groupDocs[0].id}) - only record`);
       } else {
-        const existing = seenByIndent.get(indentNo);
-        const existingComplete = (!!existing.poNo && existing.poNo.trim() !== '') && 
-                                  (!!existing.supplierName && existing.supplierName.trim() !== '');
+        // Multiple records - keep complete, skip incomplete
+        const completeRecords = groupDocs.filter(doc => 
+          (!!doc.poNo && doc.poNo.trim() !== '') && 
+          (!!doc.supplierName && doc.supplierName.trim() !== '')
+        );
         
-        if (isComplete && !existingComplete) {
-          // New record is complete, old is not - replace
-          dedupLog.push(`🔄 Replace: Indent ${indentNo} (old id: ${existing.id} - incomplete, new id: ${doc.id} - complete)`);
-          seenByIndent.set(indentNo, doc);
-        } else if (isComplete && existingComplete) {
-          // Both complete - keep most recent
-          const existingTime = existing.createdAt?.toMillis?.() || 0;
-          const newTime = doc.createdAt?.toMillis?.() || 0;
-          if (newTime > existingTime) {
-            dedupLog.push(`🔄 Replace: Indent ${indentNo} (old id: ${existing.id}, new id: ${doc.id} - newer)`);
-            seenByIndent.set(indentNo, doc);
-          } else {
-            dedupLog.push(`❌ Skip: Indent ${indentNo} (id: ${doc.id} - older duplicate)`);
-          }
+        if (completeRecords.length > 0) {
+          // Keep most recent complete record
+          completeRecords.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+          const kept = completeRecords[0];
+          deduped.push(kept);
+          dedupLog.push(`✅ Keep: Indent ${indentNo} (id: ${kept.id}) - complete record`);
+          
+          // Log removed ones
+          groupDocs.forEach(doc => {
+            if (doc.id !== kept.id) {
+              dedupLog.push(`❌ Remove: Indent ${indentNo} (id: ${doc.id}) - duplicate or incomplete`);
+            }
+          });
         } else {
-          // New is incomplete or both incomplete - skip new
-          dedupLog.push(`❌ Skip: Indent ${indentNo} (id: ${doc.id} - incomplete)`);
+          // All incomplete - keep most recent
+          groupDocs.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+          const kept = groupDocs[0];
+          deduped.push(kept);
+          dedupLog.push(`✅ Keep: Indent ${indentNo} (id: ${kept.id}) - most recent (all incomplete)`);
+          
+          groupDocs.slice(1).forEach(doc => {
+            dedupLog.push(`❌ Remove: Indent ${indentNo} (id: ${doc.id}) - older incomplete duplicate`);
+          });
         }
       }
     });
-    docs = Array.from(seenByIndent.values());
+    
+    docs = deduped;
     docs.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
     
     const removedCount = origLength - docs.length;
