@@ -20,6 +20,7 @@ import './App.css';
 import { useUserRole } from './hooks/useUserRole';
 import { useUserDataSync } from './hooks/useUserDataSync';
 import { runDataDiagnostics } from './utils/diagnostics';
+import { hardResetAllData } from './utils/firestoreServices';
 
 
 function App() {
@@ -67,6 +68,17 @@ function App() {
         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, marginTop: 10 }}>
           <span style={{ fontWeight: 500, fontSize: 16 }}>{user.email}</span>
           <div style={{ marginLeft: 8 }}><SyncStatus /></div>
+          <button onClick={async () => {
+            if (confirm('⚠️ WARNING: This will delete ALL data except ItemMaster. Are you sure?')) {
+              try {
+                await hardResetAllData(user.uid);
+                alert('✅ Hard reset completed! All data deleted except ItemMaster.');
+              } catch (err) {
+                alert('❌ Hard reset failed. Check console for details.');
+                console.error('Hard reset error:', err);
+              }
+            }
+          }} style={{ background: '#d32f2f', color: '#fff', border: 'none', borderRadius: 4, padding: '6px 14px', fontWeight: 500, cursor: 'pointer', fontSize: 14 }}>Hard Reset</button>
           <button onClick={() => setUser(null)} style={{ background: '#fff', color: '#1a237e', border: 'none', borderRadius: 4, padding: '6px 14px', fontWeight: 500, cursor: 'pointer' }}>Logout</button>
         </div>
       </header>

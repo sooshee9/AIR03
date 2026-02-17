@@ -1,4 +1,4 @@
-import { collection, query, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, doc, getDocs, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, doc, getDocs, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { logger } from './logger';
 
@@ -386,6 +386,57 @@ export const deleteItemMaster = async (uid: string, docId: string) => {
     await deleteDoc(docRef);
   } catch (error) {
     logger.error('[FirestoreServices] Error deleting itemMaster:', error);
+    throw error;
+  }
+};
+// ============ HARD RESET - Delete all data except ItemMaster ============
+export const hardResetAllData = async (uid: string) => {
+  try {
+    console.log('[FirestoreServices] Starting hard reset for user:', uid);
+    
+    const collectionsToDelete = [
+      'vendorIssues',
+      'vsirRecords',
+      'purchaseOrders',
+      'vendorDepts',
+      'indents'
+    ];
+    
+    // Delete all docs from each collection under users/{uid}
+    for (const collectionName of collectionsToDelete) {
+      try {
+        const col = collection(db, 'users', uid, collectionName);
+        const snap = await getDocs(col);
+        
+        for (const doc of snap.docs) {
+          await deleteDoc(doc.ref);
+        }
+        
+        console.log(`[FirestoreServices] Deleted ${snap.docs.length} documents from ${collectionName}`);
+      } catch (err) {
+        console.error(`[FirestoreServices] Error deleting from ${collectionName}:`, err);
+      }
+    }
+    
+    // Delete user's PSIRs from root psirs collection (where userId == uid)
+    try {
+      const psirCol = collection(db, 'psirs');
+      const q = query(psirCol, where('userId', '==', uid));
+      const snap = await getDocs(q);
+      
+      for (const doc of snap.docs) {
+        await deleteDoc(doc.ref);
+      }
+      
+      console.log(`[FirestoreServices] Deleted ${snap.docs.length} PSIRs`);
+    } catch (err) {
+      console.error('[FirestoreServices] Error deleting PSIRs:', err);
+    }
+    
+    console.log('[FirestoreServices] Hard reset completed successfully');
+    return { success: true, message: 'All data deleted except ItemMaster' };
+  } catch (error) {
+    logger.error('[FirestoreServices] Error during hard reset:', error);
     throw error;
   }
 };
