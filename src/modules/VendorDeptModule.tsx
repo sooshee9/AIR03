@@ -1,5 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import bus from '../utils/eventBus';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth } from '../firebase';
+import { getPurchaseOrders, getPurchaseData } from '../utils/firestoreServices';
+import { subscribeVSIRRecords } from '../utils/firestoreServices';
+import { subscribePsirs } from '../utils/psirService';
 
 interface VendorDeptItem {
 	itemName: string;
@@ -298,11 +303,90 @@ const VendorDeptModule: React.FC = () => {
 		items: [],
 	});
 
+	// Current authenticated user's UID (if logged in)
+	const [userUid, setUserUid] = useState<string | null>(null);
+
 	// Accept Firestore state variables as props
-	const [purchaseOrders] = useState<any[]>([]);
-	const [purchaseData] = useState<any[]>([]);
-	const [vsirRecords] = useState<any[]>([]);
-	const [psirData] = useState<any[]>([]);
+	const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
+	const [purchaseData, setPurchaseData] = useState<any[]>([]);
+	const [vsirRecords, setVsirRecords] = useState<any[]>([]);
+	const [psirData, setPsirData] = useState<any[]>([]);
+
+	// Listen to authentication state
+	useEffect(() => {
+		const unsub = onAuthStateChanged(auth, (u) => {
+			const uid = u ? u.uid : null;
+			console.info('[VendorDeptModule] Auth state changed - userUid:', uid);
+			setUserUid(uid);
+		});
+		return () => unsub();
+	}, []);
+
+	// Load purchase orders, purchase data, VSIR, and PSIR from Firestore
+	useEffect(() => {
+		const loadData = async () => {
+			try {
+				if (!userUid) {
+					console.debug('[VendorDeptModule] Skipping data load - userUid is not set');
+					return;
+				}
+				console.info('[VendorDeptModule] Starting data load for user:', userUid);
+				
+				const [poData, purchaseDataData] = await Promise.all([
+					getPurchaseOrders(userUid),
+					getPurchaseData(userUid),
+				]);
+				
+				if (Array.isArray(poData)) {
+					setPurchaseOrders(poData);
+					console.debug('[VendorDeptModule] Loaded', poData.length, 'purchase orders');
+				}
+				
+				if (Array.isArray(purchaseDataData)) {
+					setPurchaseData(purchaseDataData);
+					console.debug('[VendorDeptModule] Loaded', purchaseDataData.length, 'purchase data records');
+				}
+			} catch (e) {
+				console.error('[VendorDeptModule] Error loading purchase data:', e);
+			}
+		};
+
+		loadData();
+	}, [userUid]);
+
+	// Subscribe to VSIR records from Firestore
+	useEffect(() => {
+		let unsub: (() => void) | null = null;
+		if (!userUid) {
+			console.debug('[VendorDeptModule] Skipping VSIR subscription - no userUid');
+			return;
+		}
+		console.debug('[VendorDeptModule] Setting up VSIR subscription for userId:', userUid);
+		unsub = subscribeVSIRRecords(userUid, (docs) => {
+			console.debug('[VendorDeptModule] VSIR records updated:', docs.length, 'records');
+			setVsirRecords(docs);
+		});
+		return () => {
+			if (unsub) unsub();
+		};
+	}, [userUid]);
+
+	// Subscribe to PSIR records from Firestore
+	useEffect(() => {
+		let unsub: (() => void) | null = null;
+		if (!userUid) {
+			console.debug('[VendorDeptModule] Skipping PSIR subscription - no userUid');
+			return;
+		}
+		console.debug('[VendorDeptModule] Setting up PSIR subscription for userId:', userUid);
+		unsub = subscribePsirs(userUid, (docs) => {
+			console.debug('[VendorDeptModule] PSIR records updated:', docs.length, 'records');
+			setPsirData(docs);
+		});
+		return () => {
+			if (unsub) unsub();
+		};
+	}, [userUid]);
 
 	// Get all PO numbers from PurchaseModule state
 	const [purchasePOs, setPurchasePOs] = useState<string[]>([]);
