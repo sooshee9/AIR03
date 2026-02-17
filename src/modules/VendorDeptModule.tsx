@@ -2224,264 +2224,183 @@ const handleVSIRUpdate = (event?: any) => {
 					</button>
 				)}
 				<h3>Vendor Dept Orders</h3>
-				<div style={{ marginBottom: 8, display: 'flex', gap: 8 }}>
-						<button
-							onClick={() => {
-								// Preview what would change if we sync empty vendor qty from purchase
-								try {
-									const rawV = localStorage.getItem('vendorDeptData');
-									if (!rawV) { alert('No Vendor Dept data'); return; }
-									const vendor = JSON.parse(rawV) as any[];
-									const preview = vendor.map(v => ({
-										vendorId: v.vendorId,
-										items: (v.items || []).map((it: any) => {
-											const existing = Number(it.qty || 0) || 0;
-											const pq = getPurchaseQty(v.poNo, it.itemCode) || 0;
-											return { itemCode: it.itemCode, existing, purchaseQty: pq, wouldUpdate: existing === 0 && pq > 0 };
-										})
-									}));
-									const small = preview.filter(p => p.items.some((i:any)=>i.wouldUpdate));
-									if (small.length === 0) { alert('Preview: no items would be updated'); return; }
-									// show limited preview
-									const lines: string[] = [];
-									for (const p of small) {
-										for (const it of p.items.filter((x:any)=>x.wouldUpdate)) {
-											lines.push(`${p.vendorId} • ${it.itemCode} : ${it.existing} -> ${it.purchaseQty}`);
-										}
-									}
-									alert('Preview updates:\n' + lines.join('\n'));
-								} catch (err) { alert('Error during preview: ' + String(err)); }
-							}}
-							style={{ padding: '6px 8px' }}
-						>Preview Sync</button>
-
-						<button
-							onClick={() => {
-								// Non-destructive sync: fill empty vendor.qty from purchase
-								if (!confirm('Fill empty Vendor Dept qty values from Purchase PO (non-destructive)?')) return;
-								try {
-									const rawV = localStorage.getItem('vendorDeptData');
-									if (!rawV) { alert('No Vendor Dept data'); return; }
-									const vendor = JSON.parse(rawV) as any[];
-									let changed = 0;
-									const updated = vendor.map(v => ({
-										...v,
-										items: (v.items || []).map((it: any) => {
-											const existing = Number(it.qty || 0) || 0;
-											const pq = getPurchaseQty(v.poNo, it.itemCode) || 0;
-											if (existing === 0 && pq > 0) { changed++; return { ...it, qty: pq }; }
-											return it;
-										})
-									}));
-									if (changed > 0) {
-										localStorage.setItem('vendorDeptData', JSON.stringify(updated));
-										try { bus.dispatchEvent(new CustomEvent('vendorDept.updated', { detail: { vendorDeptData: updated } })); } catch (err) {}
-										setOrders(updated);
-										alert(`Sync applied: updated ${changed} vendor items' qty`);
-									} else {
-										alert('No items needed syncing');
-									}
-								} catch (err) { alert('Error during sync: ' + String(err)); }
-							}}
-							style={{ padding: '6px 8px' }}
-						>Sync Empty</button>
-
-						<button
-							onClick={() => {
-								if (!confirm('Force overwrite ALL vendor qty from Purchase PO (destructive). This cannot be undone. Proceed?')) return;
-								try {
-									const rawV = localStorage.getItem('vendorDeptData');
-									if (!rawV) { alert('No Vendor Dept data'); return; }
-									const vendor = JSON.parse(rawV) as any[];
-									let changed = 0;
-									const updated = vendor.map(v => ({
-										...v,
-										items: (v.items || []).map((it: any) => {
-											const pq = getPurchaseQty(v.poNo, it.itemCode) || 0;
-											if ((Number(it.qty || 0) || 0) !== pq) { changed++; return { ...it, qty: pq }; }
-											return it;
-										})
-									}));
-									if (changed > 0) {
-										localStorage.setItem('vendorDeptData', JSON.stringify(updated));
-										try { bus.dispatchEvent(new CustomEvent('vendorDept.updated', { detail: { vendorDeptData: updated } })); } catch (err) {}
-										setOrders(updated);
-										alert(`Force sync applied: overwrote ${changed} vendor items' qty`);
-									} else {
-										alert('No differences found; nothing overwritten');
-									}
-								} catch (err) { alert('Error during force sync: ' + String(err)); }
-							}}
-							style={{ padding: '6px 8px' }}
-						>Force Sync</button>
-					<button onClick={() => { const r = previewVendorDeptSync(); alert(`Preview items: ${r.length}`); console.log('[VendorDeptModule] Preview:', r); }} style={{ padding: '6px 10px' }}>Preview Sync</button>
-					<button onClick={() => { syncEmptyVendorDeptQty(); alert('Sync Empty Qty completed'); }} style={{ padding: '6px 10px' }}>Sync Empty Qty</button>
-					<button onClick={() => { if (confirm('Force sync will overwrite qty values where purchase data exists. Continue?')) { forceVendorDeptSync(); alert('Force Sync completed'); } }} style={{ padding: '6px 10px', background: '#e53935', color: '#fff' }}>Force Sync</button>
-					<button onClick={() => { setDebugOpen(prev => !prev); if (!debugOpen) buildDebugReport(); }} style={{ padding: '6px 10px' }}>{debugOpen ? 'Hide Debug' : 'Show Debug'}</button>
-				<button onClick={() => { setStockDebugOpen(prev => !prev); if (!stockDebugOpen) buildStockDebugReport(); }} style={{ padding: '6px 10px' }}>{stockDebugOpen ? 'Hide Stock Debug' : 'Show Stock Debug'}</button>
+				<div style={{ marginBottom: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+					<button onClick={() => { syncEmptyVendorDeptQty(); alert('Sync Empty Qty completed'); }} style={{ padding: '6px 10px', background: '#2196f3', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>Sync Empty Qty</button>
+					<button onClick={() => { if (confirm('Force sync will overwrite qty values where purchase data exists. Continue?')) { forceVendorDeptSync(); alert('Force Sync completed'); } }} style={{ padding: '6px 10px', background: '#ff9800', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>Force Sync</button>
+					<button onClick={() => { setDebugOpen(prev => !prev); if (!debugOpen) buildDebugReport(); }} style={{ padding: '6px 10px', background: '#9c27b0', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>{debugOpen ? 'Hide Debug' : 'Show Debug'}</button>
+					<button onClick={() => { setStockDebugOpen(prev => !prev); if (!stockDebugOpen) buildStockDebugReport(); }} style={{ padding: '6px 10px', background: '#673ab7', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>{stockDebugOpen ? 'Hide Stock Debug' : 'Show Stock Debug'}</button>
 				</div>
 				{stockDebugOpen && (
-				<div style={{ marginBottom: 12, border: '1px solid #ccc', padding: 8, background: '#fffef0' }}>
-					<h4>Debug: Stock Matching</h4>
-					<p style={{ margin: 0, marginBottom: 8 }}>Rows: {stockDebugReport.length}</p>
-					<table border={1} cellPadding={6} style={{ width: '100%', marginBottom: 8 }}>
-						<thead>
-							<tr>
-								<th>PO</th>
-								<th>Item Code</th>
-								<th>Item Name</th>
-								<th>Matched</th>
-								<th>Matched By</th>
-								<th>Closing Stock</th>
-								<th>Computed Stock</th>
-								<th>Closing Key</th>
-						<th>Closing Raw</th>
-						<th>Matched Record (JSON)</th>
-							</tr>
-						</thead>
-						<tbody>
-							{stockDebugReport.map((r, i) => (
-								<tr key={i}>
-									<td>{r.po}</td>
-									<td>{r.itemCode}</td>
-									<td>{r.itemName}</td>
-									<td>{r.matched ? 'Yes' : 'No'}</td>
-									<td>{r.matchedBy}</td>
-									<td>{r.closingStock ?? ''}</td>
-									<td>{r.computed}</td>
-						<td>{r.closingKey ?? ''}</td>
-						<td>{r.closingRaw ?? ''}</td>
-									<td style={{ maxWidth: 400 }}><pre style={{ whiteSpace: 'pre-wrap', maxHeight: 160, overflow: 'auto' }}>{JSON.stringify(r.matchedRecord || {}, null, 2)}</pre></td>
-								</tr>
-							))}
-						</tbody>
-					</table>
-					<div style={{ display: 'flex', gap: 8 }}>
-						<button onClick={() => { const r = buildStockDebugReport(); alert(`Refreshed stock debug entries: ${r.length}`); }} style={{ padding: '6px 10px' }}>Refresh Stock Debug</button>
-						<button onClick={() => { setStockDebugReport([]); setStockDebugOpen(false); }} style={{ padding: '6px 10px' }}>Close Stock Debug</button>
-					</div>
-				</div>
-			)}
-			{debugOpen && (
-					<div style={{ marginBottom: 12, border: '1px solid #ccc', padding: 8, background: '#fafafa' }}>
-						<h4>Debug: Vendor Dept Data Sources</h4>
-						<p style={{ margin: 0, marginBottom: 8 }}>Rows: {debugReport.length}</p>
-						<table border={1} cellPadding={6} style={{ width: '100%', marginBottom: 8 }}>
+					<div style={{ marginBottom: 12, border: '1px solid #ccc', padding: 8, background: '#fffef0', borderRadius: 4 }}>
+						<h4 style={{ margin: '0 0 12px 0' }}>Debug: Stock Matching</h4>
+						<table border={1} cellPadding={6} style={{ width: '100%', marginBottom: 8, fontSize: 12 }}>
 							<thead>
-								<tr>
-									<th>PO Qty</th>
+								<tr style={{ background: '#f5f5f5' }}>
+									<th>PO</th>
+									<th>Item Code</th>
+									<th>Item Name</th>
+									<th>Matched</th>
+									<th>Matched By</th>
+									<th>Closing Stock</th>
+									<th>Computed Stock</th>
+							<th>Closing Key</th>
+							<th>Closing Raw</th>
+							<th>Matched Record (JSON)</th>
+								</tr>
+							</thead>
+							<tbody>
+								{stockDebugReport.map((r, i) => (
+									<tr key={i} style={{ borderBottom: '1px solid #eee' }}>
+										<td>{r.po}</td>
+										<td>{r.itemCode}</td>
+										<td>{r.itemName}</td>
+										<td>{r.matched ? '✓' : '✗'}</td>
+										<td>{r.matchedBy}</td>
+										<td>{r.closingStock ?? '—'}</td>
+										<td>{r.computed}</td>
+							<td>{r.closingKey ?? '—'}</td>
+							<td>{r.closingRaw ?? '—'}</td>
+										<td style={{ maxWidth: 300 }}><pre style={{ whiteSpace: 'pre-wrap', maxHeight: 120, overflow: 'auto', fontSize: 11 }}>{JSON.stringify(r.matchedRecord || {}, null, 2)}</pre></td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+						<button onClick={() => { const r = buildStockDebugReport(); alert(`Refreshed: ${r.length} entries`); }} style={{ padding: '6px 10px', marginRight: 8 }}>Refresh</button>
+						<button onClick={() => { setStockDebugReport([]); setStockDebugOpen(false); }} style={{ padding: '6px 10px' }}>Close</button>
+					</div>
+				)}
+				{debugOpen && (
+					<div style={{ marginBottom: 12, border: '1px solid #ccc', padding: 8, background: '#f9f9f9', borderRadius: 4 }}>
+						<h4 style={{ margin: '0 0 12px 0' }}>Debug: Data Sources</h4>
+						<table border={1} cellPadding={6} style={{ width: '100%', marginBottom: 8, fontSize: 12 }}>
+							<thead>
+								<tr style={{ background: '#f5f5f5' }}>
+									<th>PO No</th>
 									<th>Item Code</th>
 									<th>Current Qty</th>
 									<th>Purchase Qty</th>
 									<th>PSIR Received</th>
 									<th>purchaseData Match</th>
-									<th>Inferred Source</th>
+									<th>Source</th>
 								</tr>
 							</thead>
 							<tbody>
 								{debugReport.map((r, i) => (
-									<tr key={i}>
+									<tr key={i} style={{ borderBottom: '1px solid #eee' }}>
 										<td>{r.po}</td>
 										<td>{r.itemCode}</td>
 										<td>{r.currentQty}</td>
 										<td>{r.purchaseQty}</td>
 										<td>{r.psirQty}</td>
-										<td>{r.pdMatch ? 'Yes' : 'No'}</td>
+										<td>{r.pdMatch ? '✓' : '✗'}</td>
 										<td>{r.inferredSource}</td>
 									</tr>
 								))}
 							</tbody>
 						</table>
-						<button onClick={() => { const r = buildDebugReport(); alert(`Refreshed debug entries: ${r.length}`); }} style={{ padding: '6px 10px' }}>Refresh Debug</button>
-						<button onClick={() => { setDebugReport([]); setDebugOpen(false); }} style={{ padding: '6px 10px' }}>Close Debug</button>
+						<button onClick={() => { const r = buildDebugReport(); alert(`Refreshed: ${r.length} entries`); }} style={{ padding: '6px 10px', marginRight: 8 }}>Refresh</button>
+						<button onClick={() => { setDebugReport([]); setDebugOpen(false); }} style={{ padding: '6px 10px' }}>Close</button>
 					</div>
 				)}
-				<table border={1} cellPadding={6} style={{ width: '100%', marginBottom: 16 }}>
-					<thead>
-						<tr>
-							<th>Order Place Date</th>
-							<th>Material Purchase PO No</th>
-							<th>OA NO</th>
-							<th>Batch No</th>
-							<th>Vendor Batch No</th>
-							<th>DC No</th>
-							<th>Vendor Name</th>
-							<th>Item Name</th>
-							<th>Item Code</th>
-							<th>Material Issue No</th>
-							<th>Qty</th>
-							<th>Indent Status</th>
-							<th>Closing Stock</th>
-							<th>Rejected Qty</th>
-							<th>Received Qty</th>
-							<th>OK Qty</th>
-							<th>Rework Qty</th>
-							<th>GRN No</th>
-							<th>Debit Note or Qty Returned</th>
-							<th>Remarks</th>
-							<th>Edit</th>
-							<th>Delete</th>
-						</tr>
-					</thead>
-					<tbody>
-						{orders.map((order, idx) => {
-							if (order.items.length === 0) {
-								return (
-									<tr key={idx}>
-										<td>{order.orderPlaceDate}</td>
-										<td>{order.materialPurchasePoNo}</td>
-										<td>{order.oaNo}</td>
-										<td>{order.batchNo}</td>
-										<td>{order.vendorBatchNo}</td>
-										<td>{order.dcNo}</td>
-										<td>{order.vendorName}</td>
-										<td colSpan={13} style={{ textAlign: 'center', color: '#888' }}>(No items)</td>
-										<td><button style={{ background: '#1976d2', color: '#fff', border: 'none', borderRadius: 4, padding: '4px 12px', cursor: 'pointer' }} onClick={() => handleEditOrder(idx)}>Edit</button></td>
-										<td><button onClick={() => handleDeleteOrder(idx)} style={{ background: '#e53935', color: '#fff', border: 'none', borderRadius: 4, padding: '4px 12px', cursor: 'pointer' }}>Delete</button></td>
-									</tr>
-								);
-							}
-							return order.items.map((item, i) => (
-								<tr key={`${idx}-${i}`}>
-									<td>{order.orderPlaceDate}</td>
-									<td>{order.materialPurchasePoNo}</td>
-									<td>{order.oaNo}</td>
-									<td>{order.batchNo}</td>
-									<td>{order.vendorBatchNo}</td>
-									<td>{order.dcNo}</td>
-									<td>{order.vendorName}</td>
-									<td>{item.itemName}</td>
-									<td>{item.itemCode}</td>
-									<td>{item.materialIssueNo}</td>
-									<td>{Math.abs(item.qty)}</td>
-									<td>{(() => {
+				<div style={{ overflowX: 'auto', border: '1px solid #ddd', borderRadius: 4, marginBottom: 16 }}>
+					<table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+						<thead>
+							<tr style={{ background: '#2c3e50', color: '#fff', fontWeight: 'bold' }}>
+								<th style={{ padding: '12px 8px', textAlign: 'center', width: '40px' }}>#</th>
+								<th style={{ padding: '12px 8px', textAlign: 'left', minWidth: '100px' }}>Item</th>
+								<th style={{ padding: '12px 8px', textAlign: 'left', minWidth: '70px' }}>Code</th>
+								<th style={{ padding: '12px 8px', textAlign: 'left', minWidth: '80px' }}>PO No</th>
+								<th style={{ padding: '12px 8px', textAlign: 'left', minWidth: '80px' }}>OA NO</th>
+								<th style={{ padding: '12px 8px', textAlign: 'left', minWidth: '100px' }}>Vendor</th>
+								<th style={{ padding: '12px 8px', textAlign: 'center', minWidth: '60px' }}>PO Qty</th>
+								<th style={{ padding: '12px 8px', textAlign: 'center', minWidth: '60px' }}>Rcvd Qty</th>
+								<th style={{ padding: '12px 8px', textAlign: 'center', minWidth: '50px' }}>OK Qty</th>
+								<th style={{ padding: '12px 8px', textAlign: 'center', minWidth: '60px' }}>Rework Qty</th>
+								<th style={{ padding: '12px 8px', textAlign: 'center', minWidth: '70px' }}>Rejected Qty</th>
+								<th style={{ padding: '12px 8px', textAlign: 'left', minWidth: '80px' }}>GRN No</th>
+								<th style={{ padding: '12px 8px', textAlign: 'left', minWidth: '100px' }}>Stock</th>
+								<th style={{ padding: '12px 8px', textAlign: 'left', minWidth: '80px' }}>Status</th>
+								<th style={{ padding: '12px 8px', textAlign: 'center', minWidth: '70px' }}>Actions</th>
+							</tr>
+						</thead>
+						<tbody>
+							{orders.map((order, idx) => {
+								if (order.items.length === 0) {
+									return (
+										<tr key={idx} style={{ background: '#f9f9f9', borderBottom: '1px solid #e0e0e0' }}>
+											<td style={{ padding: '12px 8px', textAlign: 'center' }}>—</td>
+											<td style={{ padding: '12px 8px' }}>—</td>
+											<td style={{ padding: '12px 8px' }}>—</td>
+											<td style={{ padding: '12px 8px' }}>{order.materialPurchasePoNo}</td>
+											<td style={{ padding: '12px 8px' }}>{order.oaNo}</td>
+											<td style={{ padding: '12px 8px' }}>{order.vendorName}</td>
+											<td colSpan={7} style={{ padding: '12px 8px', textAlign: 'center', color: '#888' }}>(No items)</td>
+											<td style={{ padding: '12px 8px', textAlign: 'center', display: 'flex', gap: 4, justifyContent: 'center' }}>
+												<button onClick={() => handleEditOrder(idx)} style={{ background: '#1976d2', color: '#fff', border: 'none', borderRadius: 3, padding: '4px 8px', cursor: 'pointer', fontSize: 11 }}>Edit</button>
+												<button onClick={() => handleDeleteOrder(idx)} style={{ background: '#e53935', color: '#fff', border: 'none', borderRadius: 3, padding: '4px 8px', cursor: 'pointer', fontSize: 11 }}>Del</button>
+											</td>
+										</tr>
+									);
+								}
+								return order.items.map((item, itemIdx) => {
+									const stockVal = getClosingStock(item.itemCode, item.itemName);
+									const indentStatus = (() => {
 										try {
-
-
-	
-	
-	
 											const purchaseStatus = getIndentStatusFromPurchase(order.materialPurchasePoNo, item.itemCode, item.materialIssueNo || '');
 											return (purchaseStatus || (item.indentStatus || '')).toString().toUpperCase();
 										} catch {
-											return 'NO STATUS';
+											return 'UNKNOWN';
 										}
-									})()}</td>
-									<td>{getClosingStock(item.itemCode, item.itemName)}</td>
-									<td>{item.rejectedQty}</td>
-									<td>{item.receivedQty}</td>
-									<td>{item.okQty}</td>
-									<td>{item.reworkQty}</td>
-									<td>{item.grnNo}</td>
-									<td>{item.debitNoteOrQtyReturned}</td>
-									<td>{item.remarks}</td>
-									<td><button style={{ background: '#1976d2', color: '#fff', border: 'none', borderRadius: 4, padding: '4px 12px', cursor: 'pointer' }} onClick={() => handleEditOrder(idx)}>Edit</button></td>
-									<td><button onClick={() => handleDeleteItem(idx, i)} style={{ background: '#e53935', color: '#fff', border: 'none', borderRadius: 4, padding: '4px 12px', cursor: 'pointer' }}>Delete</button></td>
-								</tr>
-							));
-						})}
-					</tbody>
-				</table>
+									})();
+									
+									return (
+										<tr key={`${idx}-${itemIdx}`} style={{ borderBottom: '1px solid #e0e0e0', background: itemIdx % 2 === 0 ? '#fff' : '#fafafa' }}>
+											<td style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 'bold', color: '#555' }}>{idx + 1}</td>
+											<td style={{ padding: '12px 8px' }}>{item.itemName || '—'}</td>
+											<td style={{ padding: '12px 8px', fontFamily: 'monospace', fontWeight: '500' }}>{item.itemCode || '—'}</td>
+											<td style={{ padding: '12px 8px', fontWeight: '500' }}>{order.materialPurchasePoNo}</td>
+											<td style={{ padding: '12px 8px' }}>{order.oaNo}</td>
+											<td style={{ padding: '12px 8px' }}>{order.vendorName}</td>
+											<td style={{ padding: '12px 8px', textAlign: 'center' }}>{item.qty || '—'}</td>
+											<td style={{ padding: '12px 8px', textAlign: 'center' }}>{item.receivedQty || '—'}</td>
+											<td style={{ padding: '12px 8px', textAlign: 'center', color: '#4caf50', fontWeight: 'bold' }}>{item.okQty || '—'}</td>
+											<td style={{ padding: '12px 8px', textAlign: 'center', color: '#ff9800', fontWeight: 'bold' }}>{item.reworkQty || '—'}</td>
+											<td style={{ padding: '12px 8px', textAlign: 'center', color: '#e53935', fontWeight: 'bold' }}>{item.rejectedQty || '—'}</td>
+											<td style={{ padding: '12px 8px' }}>{item.grnNo || '—'}</td>
+											<td style={{ padding: '12px 8px', textAlign: 'center' }}>
+												<span style={{ 
+													background: Number(stockVal) > 0 ? '#c8e6c9' : '#ffcdd2', 
+													padding: '3px 8px', 
+													borderRadius: '3px', 
+													fontSize: '11px',
+													fontWeight: 'bold'
+												}}>
+													{stockVal || '—'}
+												</span>
+											</td>
+											<td style={{ padding: '12px 8px', textAlign: 'center' }}>
+												<span style={{
+													background: indentStatus === 'CLOSED' ? '#4caf50' : indentStatus === 'PARTIAL' ? '#ff9800' : '#2196f3',
+													color: '#fff',
+													padding: '3px 8px',
+													borderRadius: '3px',
+													fontSize: '11px',
+													fontWeight: 'bold'
+												}}>
+													{indentStatus}
+												</span>
+											</td>
+											<td style={{ padding: '12px 8px', textAlign: 'center', display: 'flex', gap: 4, justifyContent: 'center' }}>
+												<button onClick={() => handleEditOrder(idx)} style={{ background: '#1976d2', color: '#fff', border: 'none', borderRadius: 3, padding: '4px 8px', cursor: 'pointer', fontSize: 11 }}>Edit</button>
+												<button onClick={() => handleDeleteItem(idx, itemIdx)} style={{ background: '#e53935', color: '#fff', border: 'none', borderRadius: 3, padding: '4px 8px', cursor: 'pointer', fontSize: 11 }}>Del</button>
+											</td>
+										</tr>
+									);
+								});
+							})}
+						</tbody>
+					</table>
+				</div>
 			</div>
 		</div>
 	);
