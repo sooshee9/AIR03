@@ -131,75 +131,34 @@ const VSIRModule: React.FC = () => {
   }, []);
 
   // Auto-fill Indent No from PSIR for all records that have poNo but missing indentNo
+  // PSIR data is already subscribed in the auth effect above, just use it here
   useEffect(() => {
-    if (!isInitialized || records.length === 0) {
+    if (!isInitialized || records.length === 0 || psirData.length === 0) {
       return;
     }
 
-    // Try Firestore realtime PSIRs when logged in, fall back to localStorage
-    let unsub: (() => void) | null = null;
-    const authUnsub = onAuthStateChanged(auth, (u) => {
-      if (!u) {
-        try {
-          const psirDataRaw = localStorage.getItem('psirData');
-          if (!psirDataRaw) return;
-          const psirData = JSON.parse(psirDataRaw);
-          if (!Array.isArray(psirData)) return;
-          setPsirData(psirData);
-
-          console.log('[VSIR] Auto-filling Indent No from local psirData');
-          let updated = false;
-          const updatedRecords = records.map(record => {
-            if (record.poNo && (!record.indentNo || record.indentNo.trim() === '')) {
-              for (const psir of psirData) {
-                if (psir.poNo && psir.poNo.toString().trim() === record.poNo.toString().trim()) {
-                  const indentNo = psir.indentNo || '';
-                  if (indentNo && indentNo !== record.indentNo) {
-                    updated = true;
-                    return { ...record, indentNo };
-                  }
-                  break;
-                }
-              }
+    console.log('[VSIR] Auto-filling Indent No from Firestore PSIRs');
+    let updated = false;
+    const updatedRecords = records.map(record => {
+      if (record.poNo && (!record.indentNo || record.indentNo.trim() === '')) {
+        for (const psir of psirData) {
+          if (psir.poNo && psir.poNo.toString().trim() === record.poNo.toString().trim()) {
+            const indentNo = psir.indentNo || '';
+            if (indentNo && indentNo !== record.indentNo) {
+              updated = true;
+              return { ...record, indentNo };
             }
-            return record;
-          });
-
-          if (updated) setRecords(updatedRecords);
-        } catch (e) { console.error('[VSIR] Error auto-filling indent no from local', e); }
-        return;
-      }
-
-      unsub = subscribePsirs(u.uid, docs => {
-        const psirDataFromFs = docs.map(d => ({ ...d })) as any[];
-        setPsirData(psirDataFromFs);
-        console.log('[VSIR] Auto-filling Indent No from Firestore PSIRs');
-        let updated = false;
-        const updatedRecords = records.map(record => {
-          if (record.poNo && (!record.indentNo || record.indentNo.trim() === '')) {
-            for (const psir of psirDataFromFs) {
-              if (psir.poNo && psir.poNo.toString().trim() === record.poNo.toString().trim()) {
-                const indentNo = psir.indentNo || '';
-                if (indentNo && indentNo !== record.indentNo) {
-                  updated = true;
-                  return { ...record, indentNo };
-                }
-                break;
-              }
-            }
+            break;
           }
-          return record;
-        });
-
-        if (updated) setRecords(updatedRecords);
-      });
+        }
+      }
+      return record;
     });
 
-    return () => {
-      if (unsub) unsub();
-      try { authUnsub(); } catch {}
-    };
-  }, [isInitialized]);
+    if (updated) {
+      setRecords(updatedRecords);
+    }
+  }, [isInitialized, psirData]);
 
   // Persist records and dispatch events
   useEffect(() => {
