@@ -2357,7 +2357,7 @@ const handleVSIRUpdate = (event?: any) => {
 											<td style={{ padding: '10px 8px', borderRight: '1px solid #ccc' }}>{order.materialPurchasePoNo}</td>
 											<td style={{ padding: '10px 8px', borderRight: '1px solid #ccc' }}>{order.oaNo}</td>
 											<td style={{ padding: '10px 8px', borderRight: '1px solid #ccc' }}>{order.vendorName}</td>
-											<td style={{ padding: '10px 8px', textAlign: 'center', borderRight: '1px solid #ccc' }}>{item.qty || '—'}</td>
+											<td style={{ padding: '10px 8px', textAlign: 'center', borderRight: '1px solid #ccc' }}>{getPurchaseQty(order.materialPurchasePoNo, item.itemCode, purchaseOrders, purchaseData) || '—'}</td>
 											<td style={{ padding: '10px 8px', textAlign: 'center', borderRight: '1px solid #ccc' }}>{item.receivedQty || '—'}</td>
 											<td style={{ padding: '10px 8px', textAlign: 'center', borderRight: '1px solid #ccc' }}>{item.okQty || '—'}</td>
 											<td style={{ padding: '10px 8px', textAlign: 'center', borderRight: '1px solid #ccc' }}>{item.reworkQty || '—'}</td>
