@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../firebase';
 import { subscribePsirs } from '../utils/psirService';
@@ -78,6 +78,9 @@ const VSIRModule: React.FC = () => {
   const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
   const [psirData, setPsirData] = useState<any[]>([]);
   const [userUid, setUserUid] = useState<string | null>(null);
+  
+  // Track existing PO+ItemCode combinations to prevent duplicates during import
+  const existingCombinationsRef = useRef<Set<string>>(new Set());
 
   // Initialize component - set isInitialized to true on mount
   useEffect(() => {
@@ -150,6 +153,14 @@ const VSIRModule: React.FC = () => {
       return () => { try { unsubAuth(); } catch {} };
   }, []);
 
+  // Update the existing combinations ref whenever records change
+  useEffect(() => {
+    existingCombinationsRef.current = new Set(
+      records.map(r => `${String(r.poNo).trim()}|${String(r.itemCode).trim()}`)
+    );
+    console.log('[VSIR] Updated dedup cache with', existingCombinationsRef.current.size, 'combinations');
+  }, [records]);
+
   // Auto-fill Indent No from PSIR for all records that have poNo but missing indentNo
   // PSIR data is already subscribed in the auth effect above, just use it here
   useEffect(() => {
@@ -177,6 +188,18 @@ const VSIRModule: React.FC = () => {
 
     if (updated) {
       setRecords(updatedRecords);
+      // Persist the auto-filled indentNo to Firestore
+      if (userUid) {
+        updatedRecords.forEach(async (rec) => {
+          if (rec.id) {
+            try {
+              await updateVSIRRecord(userUid, String(rec.id), rec);
+            } catch (err) {
+              console.error('[VSIR] Error persisting auto-filled indentNo:', err);
+            }
+          }
+        });
+      }
     }
   }, [isInitialized, psirData]);
 
@@ -348,14 +371,16 @@ const VSIRModule: React.FC = () => {
     console.log('[VSIR] Source data entries:', sourceData.length);
 
     try {
-      const existingPOs = new Set(records.map(r => String(r.poNo).trim()));
+      // Use ref for dedup to ensure we have current combinations even if records state is stale
+      const currentCombinations = existingCombinationsRef.current;
+      console.log('[VSIR] Dedup cache has', currentCombinations.size, 'combinations');
       let importCount = 0;
 
       for (let orderIdx = 0; orderIdx < sourceData.length; orderIdx++) {
         const order: any = sourceData[orderIdx];
         const poNo = getOrderPoNo(order);
         console.log(`[VSIR] Processing order ${orderIdx}: poNo=${poNo}`);
-        if (!poNo || existingPOs.has(String(poNo).trim())) { console.log('[VSIR]  skipping existing or invalid PO:', poNo); continue; }
+        if (!poNo) { console.log('[VSIR]  skipping: no PO number'); continue; }
 
         const items = getOrderItems(order);
         if (!Array.isArray(items) || items.length === 0) { console.log('[VSIR]  skipping: no items (checked multiple keys)'); continue; }
@@ -366,6 +391,15 @@ const VSIRModule: React.FC = () => {
 
         for (let itemIdx = 0; itemIdx < items.length; itemIdx++) {
           const item = items[itemIdx];
+          const itemCode = item.itemCode || '';
+          const dedupeKey = `${String(poNo).trim()}|${String(itemCode).trim()}`;
+          
+          // Skip if this PO+Item combination already exists (check against current ref, not stale state)
+          if (currentCombinations.has(dedupeKey)) {
+            console.log(`[VSIR]  skipping duplicate: ${dedupeKey}`);
+            continue;
+          }
+          
           const newRecord: VSRIRecord = {
             id: Date.now() + Math.floor(Math.random() * 10000),
             receivedDate: '',
@@ -378,7 +412,7 @@ const VSIRModule: React.FC = () => {
             invoiceDcNo: '',
             vendorName: '',
             itemName: item.itemName || item.model || '',
-            itemCode: item.itemCode || '',
+            itemCode: itemCode,
             qtyReceived: item.qty || 0,
             okQty: 0,
             reworkQty: 0,
@@ -390,9 +424,9 @@ const VSIRModule: React.FC = () => {
           try {
             await addVSIRRecord(userUid, newRecord);
             importCount++;
-            console.log('[VSIR]   ✅ imported', poNo, newRecord.itemCode || newRecord.itemName);
+            console.log('[VSIR]   ✅ imported', dedupeKey);
           } catch (err) {
-            console.error('[VSIR]   ❌ failed to import', poNo, err);
+            console.error('[VSIR]   ❌ failed to import', dedupeKey, err);
           }
         }
       }
@@ -406,7 +440,7 @@ const VSIRModule: React.FC = () => {
   // Automatic run when data or auth changes
   useEffect(() => {
     runImport();
-  }, [purchaseOrders, purchaseData, vendorDeptOrders, records, userUid]);
+  }, [purchaseOrders, purchaseData, vendorDeptOrders, userUid]);
 
   // Fill missing OA/Batch from PSIR/VendorDept (once)
   useEffect(() => {
@@ -646,37 +680,62 @@ const VSIRModule: React.FC = () => {
       return;
     }
 
-    const newRecord: VSRIRecord = {
-      ...finalItemInput,
-      id: editIdx !== null ? records[editIdx].id : Date.now(),
-    };
+    // Check for existing record with same poNo and itemCode to prevent duplicates
+    const existingIdx = records.findIndex(r => 
+      String(r.poNo).trim() === String(finalItemInput.poNo).trim() && 
+      String(r.itemCode).trim() === String(finalItemInput.itemCode).trim()
+    );
 
-    let updated: VSRIRecord[] = [];
-    if (editIdx !== null) {
-      updated = [...records];
-      updated[editIdx] = newRecord;
-      setRecords(updated);
+    if (existingIdx !== -1) {
+      // Update existing record
+      const existing = records[existingIdx];
+      const updatedRecord = { ...existing, ...finalItemInput };
+      const updatedRecords = [...records];
+      updatedRecords[existingIdx] = updatedRecord;
+      setRecords(updatedRecords);
+
+      // Persist to Firestore
+      if (userUid) {
+        try {
+          await updateVSIRRecord(userUid, String(existing.id), updatedRecord);
+        } catch (err) {
+          console.error('[VSIR] Error updating VSIR record:', err);
+        }
+      }
     } else {
-      updated = [...records, newRecord];
-      setRecords(updated);
-    }
+      // Add new record
+      const newRecord: VSRIRecord = {
+        ...finalItemInput,
+        id: editIdx !== null ? records[editIdx].id : Date.now(),
+      };
 
-    // Persist to Firestore when logged in
-    if (userUid) {
-      try {
-        if (editIdx !== null) {
-          const existing = records[editIdx];
-          if (existing && typeof existing.id === 'string') {
-            await updateVSIRRecord(userUid, existing.id as string, newRecord);
+      let updated: VSRIRecord[] = [];
+      if (editIdx !== null) {
+        updated = [...records];
+        updated[editIdx] = newRecord;
+        setRecords(updated);
+      } else {
+        updated = [...records, newRecord];
+        setRecords(updated);
+      }
+
+      // Persist to Firestore when logged in
+      if (userUid) {
+        try {
+          if (editIdx !== null) {
+            const existing = records[editIdx];
+            if (existing && typeof existing.id === 'string') {
+              await updateVSIRRecord(userUid, existing.id as string, newRecord);
+            } else {
+              // if existing record came from localStorage (numeric id) we still create a new Firestore doc
+              await addVSIRRecord(userUid, newRecord);
+            }
           } else {
-            // if existing record came from localStorage (numeric id) we still create a new Firestore doc
             await addVSIRRecord(userUid, newRecord);
           }
-        } else {
-          await addVSIRRecord(userUid, newRecord);
+        } catch (err) {
+          console.error('[VSIR] Error persisting VSIR to Firestore:', err);
         }
-      } catch (err) {
-        console.error('[VSIR] Error persisting VSIR to Firestore:', err);
       }
     }
 
