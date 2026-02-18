@@ -231,16 +231,24 @@ const StockModule: React.FC = () => {
 
   const getIndentQtyTotal = (itemCode: string) => {
     try {
-      return (indentState || []).reduce((total: number, indent: any) => {
+      console.log('[StockModule] Calculating indentQty for itemCode:', itemCode);
+      const total = (indentState || []).reduce((total: number, indent: any) => {
         if (Array.isArray(indent.items)) {
-          return (
-            total +
-            indent.items.reduce((sum: number, item: any) => (item.itemCode === itemCode && typeof item.qty === 'number' ? sum + item.qty : sum), 0)
-          );
+          const indentSum = indent.items.reduce((sum: number, item: any) => {
+            if (item.itemCode === itemCode && typeof item.qty === 'number') {
+              console.log('[StockModule] Adding indent item qty:', item.qty, 'for itemCode:', itemCode);
+              return sum + item.qty;
+            }
+            return sum;
+          }, 0);
+          return total + indentSum;
         }
         return total;
       }, 0);
-    } catch {
+      console.log('[StockModule] Total indentQty for', itemCode, ':', total);
+      return total;
+    } catch (e) {
+      console.error('[StockModule] Error calculating indentQty:', e);
       return 0;
     }
   };
