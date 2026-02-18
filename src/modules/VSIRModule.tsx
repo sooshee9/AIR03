@@ -156,7 +156,7 @@ const VSIRModule: React.FC = () => {
   // Update the existing combinations ref whenever records change
   useEffect(() => {
     existingCombinationsRef.current = new Set(
-      records.map(r => `${String(r.poNo).trim()}|${String(r.itemCode).trim()}`)
+      records.map(r => `${String(r.poNo).trim().toLowerCase()}|${String(r.itemCode).trim().toLowerCase()}`)
     );
     console.log('[VSIR] Updated dedup cache with', existingCombinationsRef.current.size, 'combinations');
   }, [records]);
@@ -392,7 +392,7 @@ const VSIRModule: React.FC = () => {
         for (let itemIdx = 0; itemIdx < items.length; itemIdx++) {
           const item = items[itemIdx];
           const itemCode = item.itemCode || '';
-          const dedupeKey = `${String(poNo).trim()}|${String(itemCode).trim()}`;
+          const dedupeKey = `${String(poNo).trim().toLowerCase()}|${String(itemCode).trim().toLowerCase()}`;
           
           // Skip if this PO+Item combination already exists (check against current ref, not stale state)
           if (currentCombinations.has(dedupeKey)) {
@@ -682,9 +682,10 @@ const VSIRModule: React.FC = () => {
 
     // Check for existing record with same poNo and itemCode to prevent duplicates
     const existingIdx = records.findIndex(r => 
-      String(r.poNo).trim() === String(finalItemInput.poNo).trim() && 
-      String(r.itemCode).trim() === String(finalItemInput.itemCode).trim()
+      String(r.poNo).trim().toLowerCase() === String(finalItemInput.poNo).trim().toLowerCase() && 
+      String(r.itemCode).trim().toLowerCase() === String(finalItemInput.itemCode).trim().toLowerCase()
     );
+    console.log('[VSIR] Checking for duplicate: poNo=', finalItemInput.poNo, 'itemCode=', finalItemInput.itemCode, 'existingIdx=', existingIdx);
 
     if (existingIdx !== -1) {
       // Update existing record

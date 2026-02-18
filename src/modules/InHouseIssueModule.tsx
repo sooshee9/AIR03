@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth, db } from '../firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { getItemMaster } from '../utils/firestoreServices';
 
 interface InHouseIssueItem {
   itemName: string;
@@ -133,6 +134,16 @@ const InHouseIssueModule: React.FC = () => {
             }
           } catch (err) {
             console.error('[InHouseIssueModule] Migration failed:', err);
+          }
+
+          // Load Item Master from Firestore
+          try {
+            const items = await getItemMaster(uid);
+            setItemMaster((items || []) as any[]);
+            setItemNames((items || []).map((i: any) => i.itemName).filter(Boolean));
+            console.log('[InHouseIssueModule] Loaded item master:', items?.length || 0, 'items');
+          } catch (err) {
+            console.error('[InHouseIssueModule] Failed to load item master:', err);
           }
         })();
       }
