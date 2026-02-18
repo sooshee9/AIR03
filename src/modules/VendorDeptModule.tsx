@@ -602,6 +602,16 @@ const VendorDeptModule: React.FC = () => {
 		}
 	}, [newOrder.materialPurchasePoNo]);
 
+	// Auto-fill qty from purchase when itemCode changes
+	useEffect(() => {
+		if (!newOrder.materialPurchasePoNo || !itemInput.itemCode) return;
+		
+		const poQty = getPurchaseQty(newOrder.materialPurchasePoNo, itemInput.itemCode, purchaseOrders, purchaseData);
+		if (poQty > 0) {
+			setItemInput(prev => ({ ...prev, qty: poQty }));
+		}
+	}, [newOrder.materialPurchasePoNo, itemInput.itemCode, purchaseOrders, purchaseData]);
+
 	// Sync quantities from VSIR to existing orders
 	useEffect(() => {
 		if (orders.length === 0) return;
