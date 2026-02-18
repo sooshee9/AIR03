@@ -409,7 +409,7 @@ const StockModule: React.FC = () => {
         unsubInHouse = onSnapshot(coll, snap => setInHouseIssuesState(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }))));
       } catch {}
       try {
-        const coll2 = collection(db, 'userData', userUid, 'indentData');
+        const coll2 = collection(db, 'users', userUid, 'indentData');
         unsubIndent = onSnapshot(coll2, snap => setIndentState(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }))));
       } catch {}
       console.log('[StockModule] Auth effect: userUid set to', userUid);
