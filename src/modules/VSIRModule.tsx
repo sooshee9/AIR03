@@ -782,28 +782,9 @@ const VSIRModule: React.FC = () => {
       }
     }
 
-    // Reset form
-    setItemInput({
-      receivedDate: '',
-      indentNo: '',
-      poNo: '',
-      oaNo: '',
-      purchaseBatchNo: '',
-      vendorBatchNo: '',
-      dcNo: '',
-      invoiceDcNo: '',
-      vendorName: '',
-      itemName: '',
-      itemCode: '',
-      qtyReceived: 0,
-      okQty: 0,
-      reworkQty: 0,
-      rejectQty: 0,
-      grnNo: '',
-      remarks: '',
-    });
-    setFormData({ itemName: '' });
-    setEditIdx(null);
+    // Do NOT reset form after submit, so values are held
+    // Optionally, you can reset only if needed
+    // setEditIdx(null); // Keep editIdx if you want to allow further editing
   };
 
   return (
@@ -872,77 +853,54 @@ const VSIRModule: React.FC = () => {
               <input
                 type={field.type}
                 name={field.key}
-                value={itemInput.itemCode}
-                onChange={handleChange}
-                required
-                style={{ width: '100%', padding: 6, borderRadius: 4, border: '1px solid #bbb' }}
-                readOnly={itemNames.length > 0}
-              />
-            ) : field.key === 'oaNo' || field.key === 'dcNo' || field.key === 'purchaseBatchNo' ? (
-              <input
-                type="text"
-                name={field.key}
-                value={(itemInput as any)[field.key]}
-                readOnly
-                style={{ fontWeight: 'bold', background: '#f0f0f0', width: 120 }}
-              />
-            ) : (
-              <input
-                type={field.type}
-                name={field.key}
-                value={(itemInput as any)[field.key]}
-                onChange={handleChange}
-                required={field.key !== 'remarks'}
-                style={{ width: '100%', padding: 6, borderRadius: 4, border: '1px solid #bbb' }}
-              />
-            )}
-          </div>
-        ))}
-        <button
-          type="submit"
-          style={{
-            padding: '10px 24px',
-            background: '#1a237e',
-            color: '#fff',
-            border: 'none',
-            borderRadius: 4,
-            fontWeight: 500,
-            marginTop: 24,
-          }}
-        >
-          {editIdx !== null ? 'Update' : 'Add'}
-        </button>
-      </form>
+                let finalItemInput = { ...itemInput };
 
-      {/* Manual Import Trigger */}
-      <div style={{ marginBottom: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button
-          onClick={() => {
-            console.log('[VSIR] Manual trigger - Forcing auto-import...');
-            console.log('[VSIR] Purchase Orders:', purchaseOrders);
-            console.log('[VSIR] Purchase Data:', purchaseData);
-          }}
-          style={{
-            padding: '8px 16px',
-            background: '#ff9800',
-            color: '#fff',
-            border: 'none',
-            borderRadius: 4,
-            fontWeight: 500,
-            cursor: 'pointer',
-          }}
-        >
-          🔍 View Data in Console
-        </button>
-        <button
-          onClick={() => {
-            console.log('[VSIR] Manual Import button clicked - running import');
-            runImport();
-          }}
-          style={{
-            padding: '8px 16px',
-            background: '#1976d2',
-            color: '#fff',
+                // Vendor Batch No should ONLY be populated if invoiceDcNo is manually entered (prerequisite)
+                const hasInvoiceDcNo = finalItemInput.invoiceDcNo && String(finalItemInput.invoiceDcNo).trim();
+                if (hasInvoiceDcNo && !finalItemInput.vendorBatchNo?.trim() && finalItemInput.poNo) {
+                  let vb = getVendorBatchNoForPO(finalItemInput.poNo);
+                  if (!vb) {
+                    console.log('[VSIR] Vendor Batch No not found in VendorDept for PO:', finalItemInput.poNo, '- leaving empty for manual entry or sync');
+                    vb = '';
+                  }
+                  finalItemInput.vendorBatchNo = vb;
+                }
+
+                // Strict duplicate prevention: Only update existing, never add duplicate
+                const existingIdx = records.findIndex((r) => {
+                  return String(r.poNo).trim().toLowerCase() === String(finalItemInput.poNo).trim().toLowerCase() &&
+                    String(r.itemCode).trim().toLowerCase() === String(finalItemInput.itemCode).trim().toLowerCase();
+                });
+                if (existingIdx !== -1) {
+                  // Update existing record only
+                  const updatedRecord = { ...records[existingIdx], ...finalItemInput };
+                  const updatedRecords = [...records];
+                  updatedRecords[existingIdx] = updatedRecord;
+                  setRecords(updatedRecords);
+                  // Persist to Firestore
+                  if (userUid) {
+                    try {
+                      await updateVSIRRecord(userUid, String(updatedRecord.id), updatedRecord);
+                    } catch (err) {
+                      console.error('[VSIR] Error updating VSIR record:', err);
+                    }
+                  }
+                } else {
+                  // Add new record only if not duplicate
+                  const newRecord: VSRIRecord = {
+                    ...finalItemInput,
+                    id: Date.now(),
+                  };
+                  const updatedRecords = [...records, newRecord];
+                  setRecords(updatedRecords);
+                  if (userUid) {
+                    try {
+                      await addVSIRRecord(userUid, newRecord);
+                    } catch (err) {
+                      console.error('[VSIR] Error persisting VSIR to Firestore:', err);
+                    }
+                  }
+                }
             border: 'none',
             borderRadius: 4,
             fontWeight: 500,
