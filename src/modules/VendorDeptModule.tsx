@@ -1,18 +1,12 @@
-// ...existing code...
-// ...existing code...
-
-const VendorDeptModule = () => {
-	// Debug state for OK Qty auto-fill
-	const [debugOkQty, setDebugOkQty] = useState<any>(null);
-	// ...existing code...
-};
-
-export default VendorDeptModule;
+import React, { useState, useEffect } from 'react';
+import bus from '../utils/eventBus';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../firebase';
 import { getPurchaseOrders, getPurchaseData, subscribeVendorDepts, addVendorDept, updateVendorDept, deleteVendorDept } from '../utils/firestoreServices';
 import { subscribeVSIRRecords } from '../utils/firestoreServices';
 import { subscribePsirs } from '../utils/psirService';
+
+// ...existing code...
 
 interface VendorDeptItem {
 	itemName: string;
@@ -300,6 +294,8 @@ const getPSIRDataByPO = (poNo: string | undefined, psirData?: any[]): any => {
 };
 
 const VendorDeptModule: React.FC = () => {
+	// Debug state for OK Qty auto-fill (must be declared here for all logic/JSX)
+	const [debugOkQty, setDebugOkQty] = useState<any>(null);
 
 	// Declare newOrder state before any useEffect that uses it
 	const [newOrder, setNewOrder] = useState<VendorDeptOrder>({
@@ -2461,5 +2457,4 @@ const handleVSIRUpdate = (event?: any) => {
 		</div>
 	);
 };
-
 export default VendorDeptModule;
