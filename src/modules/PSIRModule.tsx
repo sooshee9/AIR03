@@ -334,8 +334,9 @@ const PSIRModule: React.FC = () => {
         
         console.debug(`[PSIRModule] Processing order ${orderIdx}:`, { poNo, indentNo, supplierName: order.supplierName });
         
-        if (!poNo && !indentNo) {
-          console.debug(`[PSIRModule] Skipping order ${orderIdx} - both poNo and indentNo are empty`);
+        // Skip if PO number is not present (required field)
+        if (!poNo) {
+          console.debug(`[PSIRModule] Skipping order ${orderIdx} - PO number is required but missing`);
           return;
         }
 
@@ -351,7 +352,7 @@ const PSIRModule: React.FC = () => {
           }
         }
         
-        const orderKey = poNo ? poNo : `INDENT::${indentNo}`;
+        const orderKey = poNo;
         
         // Skip if already processed, UNLESS forceImport is true
         if (!forceImport && processedPOs.has(orderKey)) {
@@ -366,8 +367,7 @@ const PSIRModule: React.FC = () => {
 
         const existingIdx = psirs.findIndex(psir => {
           const psirPo = String(psir.poNo || '').trim();
-          const psirIndent = String(psir.indentNo || '').trim();
-          return (poNo && psirPo === poNo) || (indentNo && psirIndent === indentNo);
+          return poNo && psirPo === poNo;
         });
 
         let itemsFromPO: PSIRItem[] = [];
