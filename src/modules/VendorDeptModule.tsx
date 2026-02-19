@@ -542,11 +542,16 @@ const VendorDeptModule: React.FC = () => {
 			
 			if (matchingVSIR) {
 				const receivedQty = matchingVSIR.qtyReceived || 0;
-				const okQty = matchingVSIR.okQty || 0;
+				let okQty = 0;
+				if (typeof matchingVSIR.okQty === 'number' && matchingVSIR.okQty > 0) {
+				  okQty = matchingVSIR.okQty;
+				} else if (typeof matchingVSIR.qtyReceived === 'number' && matchingVSIR.qtyReceived > 0) {
+				  okQty = matchingVSIR.qtyReceived;
+				}
 				const reworkQty = matchingVSIR.reworkQty || 0;
 				const rejectedQty = matchingVSIR.rejectQty || 0;
 				const grnNo = matchingVSIR.grnNo || '';
-				
+                
 				console.debug('[VendorDeptModule][AutoFill] Found VSIR data for PO:', newOrder.materialPurchasePoNo, 'Item:', itemInput.itemCode, {
 					receivedQty,
 					okQty,
@@ -554,11 +559,11 @@ const VendorDeptModule: React.FC = () => {
 					rejectedQty,
 					grnNo
 				});
-				
+                
 				setItemInput(prev => ({
 					...prev,
 					receivedQty,
-					okQty, // Auto-fill OK Qty from VSIR
+					okQty, // Auto-fill OK Qty from VSIR or fallback to qtyReceived
 					reworkQty,
 					rejectedQty,
 					grnNo
