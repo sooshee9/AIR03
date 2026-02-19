@@ -2,6 +2,37 @@ import { collection, query, where, orderBy, onSnapshot, addDoc, updateDoc, setDo
 import { db } from '../firebase';
 import { logger } from './logger';
 
+// Helper: normalize numeric qty fields and strip/avoid persisting unwanted fields like okQty
+const normalizeQty = (val: any): number | undefined => {
+  if (val === null || val === undefined || val === '') return undefined;
+  const n = Number(val);
+  if (!Number.isFinite(n)) return undefined;
+  return Math.abs(n);
+};
+
+const sanitizeVSIRData = (data: any) => {
+  if (!data || typeof data !== 'object') return data;
+  const d: any = { ...data };
+
+  // Normalize top-level qty fields if present
+  if ('poQty' in d) d.poQty = normalizeQty(d.poQty);
+  // never persist okQty from client-side sources
+  if ('okQty' in d) delete d.okQty;
+
+  // Normalize nested items array (common pattern)
+  if (Array.isArray(d.items)) {
+    d.items = d.items.map((it: any) => {
+      if (!it || typeof it !== 'object') return it;
+      const copy = { ...it };
+      if ('poQty' in copy) copy.poQty = normalizeQty(copy.poQty);
+      if ('okQty' in copy) delete copy.okQty;
+      return copy;
+    });
+  }
+
+  return d;
+};
+
 // ============ PURCHASE ORDERS ============
 export const subscribePurchaseOrders = (uid: string, cb: (docs: any[]) => void) => {
   const col = collection(db, 'users', uid, 'purchaseOrders');
@@ -194,7 +225,8 @@ export const getVSIRRecords = async (uid: string) => {
 export const addVSIRRecord = async (uid: string, data: any) => {
   try {
     const col = collection(db, 'users', uid, 'vsirRecords');
-    const ref = await addDoc(col, { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    const sanitized = sanitizeVSIRData(data);
+    const ref = await addDoc(col, { ...sanitized, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
     return ref.id;
   } catch (error) {
     logger.error('[FirestoreServices] Error adding vsirRecord:', error);
@@ -205,7 +237,8 @@ export const addVSIRRecord = async (uid: string, data: any) => {
 export const updateVSIRRecord = async (uid: string, docId: string, data: any) => {
   try {
     const docRef = doc(db, 'users', uid, 'vsirRecords', docId);
-    await setDoc(docRef, { ...data, updatedAt: serverTimestamp() }, { merge: true });
+    const sanitized = sanitizeVSIRData(data);
+    await setDoc(docRef, { ...sanitized, updatedAt: serverTimestamp() }, { merge: true });
   } catch (error) {
     logger.error('[FirestoreServices] Error updating vsirRecord:', error);
     throw error;
