@@ -143,6 +143,20 @@ const VendorIssueModule: React.FC = () => {
   const [vsirRecords, setVsirRecords] = useState<any[]>([]);
   const [editIssueIdx, setEditIssueIdx] = useState<number | null>(null);
 
+  // Helper: deduplicate Vendor Issues by materialPurchasePoNo (keep first occurrence)
+  const deduplicateVendorIssues = (arr: VendorIssue[]): VendorIssue[] => {
+    const seen = new Set<string>();
+    const deduped: VendorIssue[] = [];
+    for (const issue of arr) {
+      const key = String(issue.materialPurchasePoNo || '').trim().toLowerCase();
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        deduped.push(issue);
+      }
+    }
+    return deduped;
+  };
+
   // Helper: get vendor batch no from subscribed VSIR records
   const getVendorBatchNoFromVSIR = (poNo: any): string => {
     try {
@@ -183,7 +197,8 @@ const VendorIssueModule: React.FC = () => {
     try {
       unsubIssues = subscribeVendorIssues(userUid, (docs) => {
         const mapped = docs.map(d => ({ ...d, items: Array.isArray(d.items) ? d.items : [] }));
-        setIssues(mapped as any[]);
+        const deduped = deduplicateVendorIssues(mapped as VendorIssue[]);
+        setIssues(deduped);
       });
     } catch (err) { console.error('[VendorIssueModule] subscribeVendorIssues failed:', err); }
 
