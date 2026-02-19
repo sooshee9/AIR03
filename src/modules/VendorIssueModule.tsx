@@ -340,21 +340,44 @@ const VendorIssueModule: React.FC = () => {
 
   // Auto-fill items table and date from Vendor Dept when PO No is set
   useEffect(() => {
-    if (!newIssue.materialPurchasePoNo || newIssue.items.length > 0) return;
+    if (!newIssue.materialPurchasePoNo || newIssue.items.length > 0) {
+      if (!newIssue.materialPurchasePoNo) {
+        console.debug('[VendorIssueModule][AutoFill] Skipped: No materialPurchasePoNo set');
+      } else if (newIssue.items.length > 0) {
+        console.debug('[VendorIssueModule][AutoFill] Skipped: newIssue.items already filled:', newIssue.items);
+      }
+      return;
+    }
     const match = vendorDeptOrders.find(order => order.materialPurchasePoNo === newIssue.materialPurchasePoNo);
-    if (match && Array.isArray(match.items) && match.items.length > 0) {
-      const items = match.items.map((item: any) => ({
+    if (!match) {
+      console.debug('[VendorIssueModule][AutoFill] No matching Vendor Dept order for PO:', newIssue.materialPurchasePoNo, vendorDeptOrders.map(o => o.materialPurchasePoNo));
+      return;
+    }
+    if (!Array.isArray(match.items) || match.items.length === 0) {
+      console.debug('[VendorIssueModule][AutoFill] Vendor Dept order has no items:', match);
+      return;
+    }
+    const items = match.items.map((item: any, idx: number) => {
+      const plannedQty = item.plannedQty;
+      const fallbackQty = item.qty || 0;
+      const usedQty = typeof plannedQty === 'number' ? plannedQty : fallbackQty;
+      if (typeof plannedQty === 'number') {
+        console.debug(`[VendorIssueModule][AutoFill] [Item ${idx}] Using plannedQty:`, plannedQty, item);
+      } else {
+        console.debug(`[VendorIssueModule][AutoFill] [Item ${idx}] plannedQty not found, using qty:`, fallbackQty, item);
+      }
+      return {
         itemName: item.itemName || '',
         itemCode: item.itemCode || '',
-        qty: typeof item.plannedQty === 'number' ? item.plannedQty : (item.qty || 0),
+        qty: usedQty,
         indentBy: item.indentBy || '',
         inStock: 0,
         indentClosed: false,
-      }));
-      const today = new Date().toISOString().slice(0, 10);
-      setNewIssue(prev => ({ ...prev, items, date: prev.date || today }));
-      console.debug('[VendorIssueModule][AutoFill] Filled items and date (with plannedQty if available):', items, today);
-    }
+      };
+    });
+    const today = new Date().toISOString().slice(0, 10);
+    setNewIssue(prev => ({ ...prev, items, date: prev.date || today }));
+    console.debug('[VendorIssueModule][AutoFill] Filled items and date (with plannedQty if available):', items, today);
   }, [newIssue.materialPurchasePoNo, vendorDeptOrders, newIssue.items.length]);
 
   // Auto-fill OA No, Batch No, Vendor Name, and DC No when PO No changes
