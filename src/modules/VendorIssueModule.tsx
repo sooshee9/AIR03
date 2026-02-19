@@ -346,14 +346,14 @@ const VendorIssueModule: React.FC = () => {
       const items = match.items.map((item: any) => ({
         itemName: item.itemName || '',
         itemCode: item.itemCode || '',
-        qty: item.qty || 0,
+        qty: typeof item.plannedQty === 'number' ? item.plannedQty : (item.qty || 0),
         indentBy: item.indentBy || '',
         inStock: 0,
         indentClosed: false,
       }));
       const today = new Date().toISOString().slice(0, 10);
       setNewIssue(prev => ({ ...prev, items, date: prev.date || today }));
-      console.debug('[VendorIssueModule][AutoFill] Filled items and date:', items, today);
+      console.debug('[VendorIssueModule][AutoFill] Filled items and date (with plannedQty if available):', items, today);
     }
   }, [newIssue.materialPurchasePoNo, vendorDeptOrders, newIssue.items.length]);
 
