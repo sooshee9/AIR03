@@ -266,7 +266,7 @@ const VendorIssueModule: React.FC = () => {
     }
   }, []);
 
-  // Listen for vendorDept and VSIR updates to reload vendorDeptOrders
+  // Listen for vendorDept and VSIR updates to reload vendorDeptOrders (register once on mount)
   useEffect(() => {
     const handleVendorDeptUpdate = () => {
       console.log('[VendorIssueModule] ✓ VendorDept data updated event received!');
@@ -290,12 +290,6 @@ const VendorIssueModule: React.FC = () => {
     
     const handleVSIRUpdate = () => {
       console.log('[VendorIssueModule] ✓ VSIR data updated event received!');
-      // Trigger auto-fill for current PO if we have one
-      if (newIssue.materialPurchasePoNo) {
-        console.log('[VendorIssueModule] Re-triggering auto-fill due to VSIR update for PO:', newIssue.materialPurchasePoNo);
-        // Force a re-render by updating a state variable
-        setVendorDeptOrders(prev => [...prev]);
-      }
     };
 
     // Listen to storage changes
@@ -311,7 +305,7 @@ const VendorIssueModule: React.FC = () => {
     window.addEventListener('storage', storageHandler);
     bus.addEventListener('vendorDept.updated', handleVendorDeptUpdate as EventListener);
     bus.addEventListener('vsir.updated', handleVSIRUpdate as EventListener);
-    console.log('[VendorIssueModule] Listeners registered for vendorDept and VSIR updates');
+    console.log('[VendorIssueModule] Listeners registered for vendorDept and VSIR updates (runs once on mount)');
 
     return () => {
       window.removeEventListener('storage', storageHandler);
@@ -319,7 +313,7 @@ const VendorIssueModule: React.FC = () => {
       bus.removeEventListener('vsir.updated', handleVSIRUpdate as EventListener);
       console.log('[VendorIssueModule] Listeners removed');
     };
-  }, [newIssue.materialPurchasePoNo]);
+  }, []);
 
   // Auto-fill Material Purchase PO No from Vendor Dept
   useEffect(() => {
@@ -522,36 +516,52 @@ const VendorIssueModule: React.FC = () => {
   useEffect(() => {
     const importPurchaseOrders = () => {
       const purchaseOrdersRaw = localStorage.getItem('purchaseOrders');
+      console.log('[VendorIssueModule][AutoImport] === IMPORT CYCLE STARTED ===');
+      console.log('[VendorIssueModule][AutoImport] purchaseOrdersRaw exists:', !!purchaseOrdersRaw);
+      
       let purchaseEntries = [];
       try {
         purchaseEntries = purchaseOrdersRaw ? JSON.parse(purchaseOrdersRaw) : [];
-        console.debug('[VendorIssueModule][AutoImport] Parsed purchaseEntries count:', purchaseEntries.length);
+        console.log('[VendorIssueModule][AutoImport] ✓ Parsed purchaseEntries count:', purchaseEntries.length);
+        if (purchaseEntries.length > 0) {
+          console.log('[VendorIssueModule][AutoImport] First 3 entries:', purchaseEntries.slice(0, 3).map((e: any) => ({ poNo: e.poNo, itemName: e.itemName })));
+        }
       } catch (err) {
-        console.error('[VendorIssueModule][AutoImport] Error parsing purchaseOrders:', err);
+        console.error('[VendorIssueModule][AutoImport] ✗ Error parsing purchaseOrders:', err);
+        return;
+      }
+
+      if (purchaseEntries.length === 0) {
+        console.warn('[VendorIssueModule][AutoImport] No purchase entries found in localStorage, skipping import');
         return;
       }
 
       const poGroups: Record<string, any[]> = {};
       purchaseEntries.forEach((entry: any) => {
-        if (!entry.poNo) return;
+        if (!entry.poNo) {
+          console.warn('[VendorIssueModule][AutoImport] Entry missing poNo:', entry);
+          return;
+        }
         if (!poGroups[entry.poNo]) poGroups[entry.poNo] = [];
         poGroups[entry.poNo].push(entry);
       });
 
       const purchasePOs = Object.keys(poGroups);
-      console.debug('[VendorIssueModule][AutoImport] Unique POs in purchaseOrders:', purchasePOs);
+      console.log('[VendorIssueModule][AutoImport] ✓ Found unique POs:', purchasePOs);
+      console.log('[VendorIssueModule][AutoImport] Total unique POs count:', purchasePOs.length);
       
       // Get the current issues to check existing POs
       const currentIssues = issues || [];
       const existingPOs = new Set(currentIssues.map(issue => issue.materialPurchasePoNo));
-      console.debug('[VendorIssueModule][AutoImport] Existing POs in issues:', Array.from(existingPOs));
+      console.log('[VendorIssueModule][AutoImport] Current issues count:', currentIssues.length);
+      console.log('[VendorIssueModule][AutoImport] Existing POs in issues:', Array.from(existingPOs));
       
       let added = false;
       const newIssues = [...currentIssues];
 
       purchasePOs.forEach(poNo => {
         if (!existingPOs.has(poNo)) {
-          console.debug('[VendorIssueModule][AutoImport] Importing new PO:', poNo);
+          console.log('[VendorIssueModule][AutoImport] ✓ NEW PO to import:', poNo);
           const group = poGroups[poNo];
           const items = group.map((item: any) => ({
             itemName: item.itemName || item.model || '',
@@ -618,15 +628,15 @@ const VendorIssueModule: React.FC = () => {
           console.debug('[VendorIssueModule][AutoImport] Added issue for PO:', poNo, newIssueObj);
           added = true;
         } else {
-          console.debug('[VendorIssueModule][AutoImport] PO already exists, skipping:', poNo);
+          console.log('[VendorIssueModule][AutoImport] ✗ PO already exists (skipping):', poNo);
         }
       });
 
       if (added) {
-        console.debug('[VendorIssueModule][AutoImport] Total issues before dedup:', newIssues.length);
+        console.log('[VendorIssueModule][AutoImport] ✓ Added new issues to list, total before dedup:', newIssues.length);
         const dedupedNewIssues = deduplicateVendorIssues(newIssues);
-        console.debug('[VendorIssueModule][AutoImport] Total issues after dedup:', dedupedNewIssues.length);
-        console.debug('[VendorIssueModule][AutoImport] Deduped issues:', dedupedNewIssues.map(i => i.materialPurchasePoNo));
+        console.log('[VendorIssueModule][AutoImport] Total issues after dedup:', dedupedNewIssues.length);
+        console.log('[VendorIssueModule][AutoImport] POs in final list:', dedupedNewIssues.map(i => i.materialPurchasePoNo));
         
         setIssues(dedupedNewIssues);
         if (userUid) {
@@ -636,7 +646,7 @@ const VendorIssueModule: React.FC = () => {
                 if (iss.id) await updateVendorIssue(userUid, iss.id, iss);
                 else await addVendorIssue(userUid, iss);
               }));
-              console.debug('[VendorIssueModule][AutoImport] Imported issues persisted to Firestore');
+              console.log('[VendorIssueModule][AutoImport] ✓ Imported issues persisted to Firestore successfully');
             } catch (err) {
               console.error('[VendorIssueModule] Failed to persist imported issues to Firestore:', err);
               try { localStorage.setItem('vendorIssueData', JSON.stringify(dedupedNewIssues)); } catch {}
@@ -645,15 +655,20 @@ const VendorIssueModule: React.FC = () => {
         } else {
           try { localStorage.setItem('vendorIssueData', JSON.stringify(dedupedNewIssues)); } catch {}
         }
+      } else {
+        console.log('[VendorIssueModule][AutoImport] No new POs to add this cycle');
       }
+      console.log('[VendorIssueModule][AutoImport] === IMPORT CYCLE ENDED ===\n');
     };
 
+    console.log('[VendorIssueModule][AutoImport] Setting up auto-import (runs every 1s and on storage events)');
     importPurchaseOrders();
     window.addEventListener('storage', importPurchaseOrders);
     const interval = setInterval(importPurchaseOrders, 1000);
     return () => {
       window.removeEventListener('storage', importPurchaseOrders);
       clearInterval(interval);
+      console.log('[VendorIssueModule][AutoImport] Auto-import cleanup');
     };
   }, [userUid, vendorDeptOrders]);
 
