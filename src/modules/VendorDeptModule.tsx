@@ -2180,7 +2180,7 @@ const handleVSIRUpdate = (event?: any) => {
 										<td style={{ display: 'flex', gap: 4 }}>
 											<button
 												onClick={() => {
-													setItemInput(item);
+													setItemInput({ ...item, okQty: 0, qty: Math.max(0, item.qty || 0) });
 													setEditIdx({ orderIdx: 0, itemIdx });
 												}}
 												style={{ background: '#ff9800', color: '#fff', border: 'none', borderRadius: 3, padding: '4px 8px', cursor: 'pointer', fontSize: 11 }}
