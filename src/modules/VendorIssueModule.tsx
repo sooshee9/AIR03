@@ -449,6 +449,16 @@ const VendorIssueModule: React.FC = () => {
           needsUpdate = true;
         }
         
+        // If still no vendor batch no, try VSIR
+        if (!newVendorBatchNo) {
+          const vsirVendorBatchNo = getVendorBatchNoFromVSIR(issue.materialPurchasePoNo);
+          if (vsirVendorBatchNo) {
+            newVendorBatchNo = vsirVendorBatchNo;
+            needsUpdate = true;
+            console.debug('[VendorIssueModule][Sync] ✓ Found vendor batch no from VSIR for PO:', issue.materialPurchasePoNo);
+          }
+        }
+        
         if (needsUpdate) {
           updated = true;
           console.debug('[VendorIssueModule][Sync] Updated issue with PO:', issue.materialPurchasePoNo, { newVendorName, newVendorBatchNo });
@@ -602,13 +612,30 @@ const VendorIssueModule: React.FC = () => {
           let autoVendorName = match?.vendorName || '';
           let autoVendorBatchNo = match?.vendorBatchNo || '';
           
+          // Try VSIR if not found in VendorDept
           if (!autoVendorBatchNo) {
             const vsirVendorBatchNo = getVendorBatchNoFromVSIR(poNo);
             if (vsirVendorBatchNo) {
               autoVendorBatchNo = vsirVendorBatchNo;
-              console.debug('[VendorIssueModule][AutoImport] VSIR vendor batch no:', autoVendorBatchNo);
+              console.debug('[VendorIssueModule][AutoImport] ✓ Vendor batch no from VSIR:', autoVendorBatchNo);
             }
           }
+          
+          // Try to find from purchaseOrders entries for this PO
+          if (!autoVendorBatchNo && group.length > 0) {
+            const vendorBatchFromPO = group.find((item: any) => item.vendorBatchNo && String(item.vendorBatchNo).trim());
+            if (vendorBatchFromPO) {
+              autoVendorBatchNo = vendorBatchFromPO.vendorBatchNo;
+              console.debug('[VendorIssueModule][AutoImport] ✓ Vendor batch no from purchaseOrders:', autoVendorBatchNo);
+            }
+          }
+          
+          // Log vendor batch no status
+          if (!autoVendorBatchNo) {
+            console.warn('[VendorIssueModule][AutoImport] ⚠ Vendor Batch No not found for PO:', poNo);
+          }
+          
+          console.debug('[VendorIssueModule][AutoImport] Final vendor values - Name:', autoVendorName, 'Batch No:', autoVendorBatchNo);
           
           const newIssueObj = {
             date: first?.orderPlaceDate || new Date().toISOString().slice(0, 10),
@@ -665,6 +692,58 @@ const VendorIssueModule: React.FC = () => {
       importPurchaseOrders();
     }
   }, [purchaseOrders, userUid]);
+
+  // Fill missing Vendor Batch No from VSIR and purchaseOrders for existing issues
+  useEffect(() => {
+    if (issues.length === 0) return;
+    
+    let updated = false;
+    const updatedIssues = issues.map(issue => {
+      if (!issue.vendorBatchNo && issue.materialPurchasePoNo) {
+        // Try VSIR first
+        const vsirVendorBatchNo = getVendorBatchNoFromVSIR(issue.materialPurchasePoNo);
+        if (vsirVendorBatchNo) {
+          console.debug('[VendorIssueModule][FillVendorBatch] ✓ Filled vendor batch no from VSIR for PO:', issue.materialPurchasePoNo, vsirVendorBatchNo);
+          updated = true;
+          return { ...issue, vendorBatchNo: vsirVendorBatchNo };
+        }
+        
+        // Try purchaseOrders if VSIR didn't have it
+        const poEntry = purchaseOrders.find((po: any) => 
+          String(po.poNo || '').trim() === String(issue.materialPurchasePoNo || '').trim() && 
+          po.vendorBatchNo && String(po.vendorBatchNo).trim()
+        );
+        if (poEntry) {
+          console.debug('[VendorIssueModule][FillVendorBatch] ✓ Filled vendor batch no from purchaseOrders for PO:', issue.materialPurchasePoNo, poEntry.vendorBatchNo);
+          updated = true;
+          return { ...issue, vendorBatchNo: poEntry.vendorBatchNo };
+        }
+      }
+      return issue;
+    });
+    
+    if (updated) {
+      console.debug('[VendorIssueModule][FillVendorBatch] Updating issues with vendor batch no');
+      const dedupedUpdatedIssues = deduplicateVendorIssues(updatedIssues);
+      setIssues(dedupedUpdatedIssues);
+      if (userUid) {
+        (async () => {
+          try {
+            await Promise.all(dedupedUpdatedIssues.map(async (iss: any) => {
+              if (iss.id) await updateVendorIssue(userUid, iss.id, iss);
+              else await addVendorIssue(userUid, iss);
+            }));
+            console.log('[VendorIssueModule][FillVendorBatch] ✓ Vendor batch no updates persisted to Firestore');
+          } catch (err) {
+            console.error('[VendorIssueModule] Failed to persist vendor batch no updates to Firestore:', err);
+            try { localStorage.setItem('vendorIssueData', JSON.stringify(dedupedUpdatedIssues)); } catch {}
+          }
+        })();
+      } else {
+        try { localStorage.setItem('vendorIssueData', JSON.stringify(dedupedUpdatedIssues)); } catch {}
+      }
+    }
+  }, [vsirRecords, purchaseOrders, userUid]);
 
   // Fill missing OA No and Batch No from PSIR for existing issues
   useEffect(() => {
