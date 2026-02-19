@@ -1364,6 +1364,13 @@ useEffect(() => {
 				remarks: item.remarks || '',
 			}));
 
+			// Skip if PO quantity is 0
+			const totalQty = items.reduce((sum, item) => sum + (item.qty || 0), 0);
+			if (totalQty === 0) {
+				console.debug('[VendorDeptModule][AutoImport] Skipping PO', normalizedPoNo, '- Total quantity is 0');
+				return;
+			}
+
 			// Create and save the order to Firebase
 			const newOrder: VendorDeptOrder = {
 				orderPlaceDate: first?.orderPlaceDate || '',
