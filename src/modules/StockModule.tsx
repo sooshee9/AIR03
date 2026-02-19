@@ -205,10 +205,19 @@ const StockModule: React.FC = () => {
     return Math.max(0, vendorIssuedTotal - vsirReceivedTotal);
   };
 
-  const getAdjustedVendorOkQty = (itemCode: string) => {
-    const vendorDeptOkQty = getVendorDeptOkQtyTotal(itemCode) || 0;
-    const totalInHouseIssuedVendor = getInHouseIssuedQtyByTransactionType(itemCode || '', 'Vendor') || 0;
-    return Math.max(0, vendorDeptOkQty - totalInHouseIssuedVendor);
+  // Vendor OK Qty: sum of OK Qty from VSIR records for this item
+  const getVendorOkQtyFromVSIR = (itemCode: string) => {
+    try {
+      return (vsirRecordsState || []).reduce((total: number, record: any) => {
+        if (record.itemCode === itemCode) {
+          const okQty = typeof record.okQty === 'number' ? record.okQty : 0;
+          return total + okQty;
+        }
+        return total;
+      }, 0);
+    } catch {
+      return 0;
+    }
   };
 
 
@@ -860,7 +869,7 @@ const StockModule: React.FC = () => {
                       : field.key === "vendorQty"
                       ? Math.max(0, (getVendorDeptQtyTotal(rec.itemCode) || 0) - (getVendorIssuedQtyTotal(rec.itemCode) || 0))
                       : field.key === "vendorOkQty"
-                      ? getAdjustedVendorOkQty(rec.itemCode)
+                      ? getVendorOkQtyFromVSIR(rec.itemCode)
                       : field.key === "inHouseIssuedQty"
                       ? getInHouseIssuedQtyByItemName(rec.itemName, rec.itemCode)
                       : field.key === "vendorIssuedQty"
