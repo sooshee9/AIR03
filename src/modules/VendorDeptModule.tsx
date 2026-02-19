@@ -538,10 +538,11 @@ const VendorDeptModule: React.FC = () => {
 			
 			if (!Array.isArray(vsirRecords)) return;
 			
-			// Find matching VSIR record for this PO and item
+			// Find matching VSIR record for this PO and item (robust: trim, uppercase)
+			const norm = (v: any) => (v === undefined || v === null) ? '' : String(v).trim().toUpperCase();
 			const matchingVSIR = vsirRecords.find((vsir: any) =>
-				vsir.poNo === newOrder.materialPurchasePoNo &&
-				vsir.itemCode === itemInput.itemCode
+				norm(vsir.poNo) === norm(newOrder.materialPurchasePoNo) &&
+				norm(vsir.itemCode) === norm(itemInput.itemCode)
 			);
 			
 						if (matchingVSIR) {
