@@ -454,7 +454,7 @@ const PSIRModule: React.FC = () => {
         }
 
         // Skip if PO quantity is 0
-        const totalPoQty = (itemsFromPO || []).reduce((sum, item) => sum + (item.poQty || 0), 0);
+        const totalPoQty = (itemsFromPO || []).reduce((sum: number, item: any) => sum + (item.poQty || 0), 0);
         if (totalPoQty === 0) {
           console.debug(`[PSIRModule] Skipping order ${orderIdx} - Total PO quantity is 0`);
           return;
