@@ -405,7 +405,7 @@ const StockModule: React.FC = () => {
 
       // inHouseIssueData, indentData and itemMasterData don't have helpers — subscribe directly
       try {
-        const coll = collection(db, 'userData', userUid, 'inHouseIssueData');
+        const coll = collection(db, 'users', userUid, 'inHouseIssues');
         unsubInHouse = onSnapshot(coll, snap => setInHouseIssuesState(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }))));
       } catch {}
       try {
