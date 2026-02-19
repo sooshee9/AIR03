@@ -1,4 +1,4 @@
-import { collection, query, where, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, doc, getDocs, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, orderBy, onSnapshot, addDoc, updateDoc, setDoc, deleteDoc, doc, getDocs, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { logger } from './logger';
 
@@ -205,7 +205,7 @@ export const addVSIRRecord = async (uid: string, data: any) => {
 export const updateVSIRRecord = async (uid: string, docId: string, data: any) => {
   try {
     const docRef = doc(db, 'users', uid, 'vsirRecords', docId);
-    await updateDoc(docRef, { ...data, updatedAt: serverTimestamp() });
+    await setDoc(docRef, { ...data, updatedAt: serverTimestamp() }, { merge: true });
   } catch (error) {
     logger.error('[FirestoreServices] Error updating vsirRecord:', error);
     throw error;

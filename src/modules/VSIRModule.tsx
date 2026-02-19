@@ -690,6 +690,23 @@ const VSIRModule: React.FC = () => {
     setEditIdx(idx);
   };
 
+  // Helper: create a composite key for deduplication
+  const makeKey = (poNo: string, itemCode: string) => `${String(poNo).trim().toLowerCase()}|${String(itemCode).trim().toLowerCase()}`;
+
+  // Helper: deduplicate VSIR records by poNo+itemCode (keep first occurrence)
+  const deduplicateVSIRRecords = (arr: VSRIRecord[]): VSRIRecord[] => {
+    const seen = new Set<string>();
+    const deduped: VSRIRecord[] = [];
+    for (const rec of arr) {
+      const key = makeKey(rec.poNo, rec.itemCode);
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduped.push(rec);
+      }
+    }
+    return deduped;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -699,7 +716,6 @@ const VSIRModule: React.FC = () => {
     const hasInvoiceDcNo = finalItemInput.invoiceDcNo && String(finalItemInput.invoiceDcNo).trim();
     
     if (hasInvoiceDcNo && !finalItemInput.vendorBatchNo?.trim() && finalItemInput.poNo) {
-      // Only try to fetch/generate vendorBatchNo if invoiceDcNo is entered
       let vb = getVendorBatchNoForPO(finalItemInput.poNo);
       if (!vb) {
         console.log('[VSIR] Vendor Batch No not found in VendorDept for PO:', finalItemInput.poNo, '- leaving empty for manual entry or sync');
@@ -708,83 +724,44 @@ const VSIRModule: React.FC = () => {
       finalItemInput.vendorBatchNo = vb;
       console.log('[VSIR] ✓ Invoice/DC No entered, vendorBatchNo set to:', vb);
     } else if (!hasInvoiceDcNo && !finalItemInput.vendorBatchNo?.trim()) {
-      // If invoiceDcNo not entered, leave vendorBatchNo empty
       console.log('[VSIR] ✗ Invoice/DC No not entered, vendorBatchNo will remain empty');
       finalItemInput.vendorBatchNo = '';
     }
 
-    // Validation: vendorBatchNo is required if invoiceDcNo is entered
     if (hasInvoiceDcNo && !finalItemInput.vendorBatchNo?.trim()) {
       alert('⚠️ Vendor Batch No could not be determined from VendorDept. Please save a VendorDept order for this PO first.');
       return;
     }
 
-    // Check for existing record with same poNo and itemCode to prevent duplicates
-    console.log('[VSIR] Current records:', records.map(r => ({ poNo: r.poNo, itemCode: r.itemCode })));
-    const existingIdx = records.findIndex(r => {
-      const match = String(r.poNo).trim().toLowerCase() === String(finalItemInput.poNo).trim().toLowerCase() && 
-        String(r.itemCode).trim().toLowerCase() === String(finalItemInput.itemCode).trim().toLowerCase();
-      console.log(`[VSIR] Comparing: "${String(r.poNo).trim().toLowerCase()}" === "${String(finalItemInput.poNo).trim().toLowerCase()}" && "${String(r.itemCode).trim().toLowerCase()}" === "${String(finalItemInput.itemCode).trim().toLowerCase()}" ? ${match}`);
-      return match;
-    });
-    console.log('[VSIR] Checking for duplicate: poNo=', finalItemInput.poNo, 'itemCode=', finalItemInput.itemCode, 'existingIdx=', existingIdx);
-
+    // Add or update record in local state
+    let updatedRecords: VSRIRecord[];
+    const key = makeKey(finalItemInput.poNo, finalItemInput.itemCode);
+    const existingIdx = records.findIndex(r => makeKey(r.poNo, r.itemCode) === key);
     if (existingIdx !== -1) {
-      // Update existing record
-      const existing = records[existingIdx];
-      const updatedRecord = { ...existing, ...finalItemInput };
-      const updatedRecords = [...records];
-      updatedRecords[existingIdx] = updatedRecord;
-      setRecords(updatedRecords);
-
-      // Persist to Firestore
-      if (userUid) {
-        try {
-          await updateVSIRRecord(userUid, String(existing.id), updatedRecord);
-        } catch (err) {
-          console.error('[VSIR] Error updating VSIR record:', err);
-        }
-      }
+      // Update existing
+      updatedRecords = [...records];
+      updatedRecords[existingIdx] = { ...records[existingIdx], ...finalItemInput };
     } else {
-      // Add new record
-      const newRecord: VSRIRecord = {
-        ...finalItemInput,
-        id: editIdx !== null ? records[editIdx].id : Date.now(),
-      };
+      // Add new
+      updatedRecords = [...records, { ...finalItemInput, id: Date.now() }];
+    }
+    // Deduplicate before saving
+    updatedRecords = deduplicateVSIRRecords(updatedRecords);
+    setRecords(updatedRecords);
 
-      let updated: VSRIRecord[] = [];
-      if (editIdx !== null) {
-        updated = [...records];
-        updated[editIdx] = newRecord;
-        setRecords(updated);
-      } else {
-        updated = [...records, newRecord];
-        setRecords(updated);
-      }
-
-      // Persist to Firestore when logged in
-      if (userUid) {
-        try {
-          if (editIdx !== null) {
-            const existing = records[editIdx];
-            if (existing && typeof existing.id === 'string') {
-              await updateVSIRRecord(userUid, existing.id as string, newRecord);
-            } else {
-              // if existing record came from localStorage (numeric id) we still create a new Firestore doc
-              await addVSIRRecord(userUid, newRecord);
-            }
-          } else {
-            await addVSIRRecord(userUid, newRecord);
-          }
-        } catch (err) {
-          console.error('[VSIR] Error persisting VSIR to Firestore:', err);
+    // Persist to Firestore
+    if (userUid) {
+      try {
+        if (existingIdx !== -1) {
+          await updateVSIRRecord(userUid, String(records[existingIdx].id), { ...records[existingIdx], ...finalItemInput });
+        } else {
+          await addVSIRRecord(userUid, { ...finalItemInput, id: Date.now() });
         }
+      } catch (err) {
+        console.error('[VSIR] Error persisting VSIR to Firestore:', err);
       }
     }
-
     // Do NOT reset form after submit, so values are held
-    // Optionally, you can reset only if needed
-    // setEditIdx(null); // Keep editIdx if you want to allow further editing
   };
 
   return (
