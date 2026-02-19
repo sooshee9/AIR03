@@ -1374,7 +1374,8 @@ const PSIRModule: React.FC = () => {
                     const newItems = (psir.items || []).map((item: any) => {
                       const existing = Number(item.qtyReceived || 0) || 0;
                       const poQty = getPOQtyFor(psir.poNo, psir.indentNo, item.itemCode) || 0;
-                      if (existing === 0 && poQty > 0) {
+                      // Allow filling qtyReceived from PO even if PO qty is zero
+                      if (existing === 0) {
                         changed = true; count++; return { ...item, qtyReceived: poQty };
                       }
                       return item;

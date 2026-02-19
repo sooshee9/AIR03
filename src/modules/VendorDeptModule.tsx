@@ -607,9 +607,8 @@ const VendorDeptModule: React.FC = () => {
 		if (!newOrder.materialPurchasePoNo || !itemInput.itemCode) return;
 		
 		const poQty = getPurchaseQty(newOrder.materialPurchasePoNo, itemInput.itemCode, purchaseOrders, purchaseData);
-		if (poQty > 0) {
-			setItemInput(prev => ({ ...prev, qty: poQty }));
-		}
+		// Allow zero PO quantities: always populate the qty field even when PO qty is 0
+		setItemInput(prev => ({ ...prev, qty: poQty }));
 	}, [newOrder.materialPurchasePoNo, itemInput.itemCode, purchaseOrders, purchaseData]);
 
 	// Sync quantities from VSIR to existing orders
@@ -1363,13 +1362,6 @@ useEffect(() => {
 				debitNoteOrQtyReturned: item.debitNoteOrQtyReturned || '',
 				remarks: item.remarks || '',
 			}));
-
-			// Skip if PO quantity is 0
-			const totalQty = items.reduce((sum: number, item: any) => sum + (item.qty || 0), 0);
-			if (totalQty === 0) {
-				console.debug('[VendorDeptModule][AutoImport] Skipping PO', normalizedPoNo, '- Total quantity is 0');
-				return;
-			}
 
 			// Create and save the order to Firebase
 			const newOrder: VendorDeptOrder = {
