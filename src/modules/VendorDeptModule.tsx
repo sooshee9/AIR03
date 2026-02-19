@@ -1217,6 +1217,18 @@ useEffect(() => {
 					}
 				}
 				
+				// Sanitize items: do not prefill OK Qty in the edit form and avoid negative qty values
+				try {
+					orderToEdit.items = (orderToEdit.items || []).map((it: any) => ({
+						...it,
+						// Clear OK qty so the edit form doesn't prefill it
+						okQty: undefined,
+						// If qty is negative, don't prefill it in the edit form
+						qty: (typeof it.qty === 'number' && it.qty < 0) ? undefined : it.qty
+					}));
+				} catch (e) {
+					console.debug('[VendorDeptModule] Failed to sanitize items on edit load', e);
+				}
 				setNewOrder(orderToEdit);
 				setEditOrderIdx(idx);
 			};
