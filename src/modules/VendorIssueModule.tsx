@@ -143,9 +143,21 @@ const VendorIssueModule: React.FC = () => {
   const [vsirRecords, setVsirRecords] = useState<any[]>([]);
   const [editIssueIdx, setEditIssueIdx] = useState<number | null>(null);
 
-  // ...existing code...
+  // Helper: deduplicate Vendor Issues by materialPurchasePoNo (keep first occurrence)
+  const deduplicateVendorIssues = (arr: VendorIssue[]): VendorIssue[] => {
+    const seen = new Set<string>();
+    const deduped: VendorIssue[] = [];
+    for (const issue of arr) {
+      const key = String(issue.materialPurchasePoNo || '').trim().toLowerCase();
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        deduped.push(issue);
+      }
+    }
+    return deduped;
+  };
 
-  // Troubleshooting Helper: get vendor batch no from subscribed VSIR records
+  // Helper: get vendor batch no from subscribed VSIR records
   const getVendorBatchNoFromVSIR = (poNo: any): string => {
     try {
       if (!poNo) return '';
@@ -185,7 +197,8 @@ const VendorIssueModule: React.FC = () => {
     try {
       unsubIssues = subscribeVendorIssues(userUid, (docs) => {
         const mapped = docs.map(d => ({ ...d, items: Array.isArray(d.items) ? d.items : [] }));
-        setIssues(mapped as VendorIssue[]);
+        const deduped = deduplicateVendorIssues(mapped as VendorIssue[]);
+        setIssues(deduped);
       });
     } catch (err) { console.error('[VendorIssueModule] subscribeVendorIssues failed:', err); }
 
@@ -499,6 +512,66 @@ const VendorIssueModule: React.FC = () => {
       console.debug('[VendorIssueModule][AutoAdd] Auto-added Vendor Issue:', { ...newIssue, dcNo: autoDcNo });
     }
   }, [newIssue, issues, vendorDeptOrders]);
+
+  // Auto-import vendor dept orders as vendor issues
+  useEffect(() => {
+    if (vendorDeptOrders.length === 0 || issues.length === undefined) return;
+
+    const existingPOs = new Set(issues.map(issue => issue.materialPurchasePoNo));
+    let added = false;
+    const newIssues = [...issues];
+
+    vendorDeptOrders.forEach((order: any) => {
+      if (order.materialPurchasePoNo && !existingPOs.has(order.materialPurchasePoNo)) {
+        // Create items from vendor dept order items
+        const items = Array.isArray(order.items) ? order.items.map((item: any) => ({
+          itemName: item.itemName || '',
+          itemCode: item.itemCode || '',
+          qty: item.qty || 0,
+          indentBy: item.indentBy || '',
+          inStock: 0,
+          indentClosed: false,
+        })) : [];
+
+        const today = new Date().toISOString().slice(0, 10);
+        const dcNo = order.dcNo && String(order.dcNo).trim() !== '' ? String(order.dcNo) : getNextDCNo(newIssues);
+
+        newIssues.push({
+          date: order.date || today,
+          materialPurchasePoNo: order.materialPurchasePoNo,
+          oaNo: order.oaNo || '',
+          batchNo: order.batchNo || '',
+          vendorBatchNo: order.vendorBatchNo || '',
+          dcNo,
+          issueNo: getNextIssueNo(newIssues),
+          vendorName: order.vendorName || '',
+          items,
+        });
+        added = true;
+        console.debug('[VendorIssueModule][AutoImportVendorDept] Auto-created issue from VendorDept order:', order.materialPurchasePoNo);
+      }
+    });
+
+    if (added) {
+      console.debug('[VendorIssueModule][AutoImportVendorDept] Adding', newIssues.length - issues.length, 'new issues from VendorDept orders');
+      setIssues(newIssues);
+      if (userUid) {
+        (async () => {
+          try {
+            await Promise.all(newIssues.map(async (iss: any) => {
+              if (iss.id) await updateVendorIssue(userUid, iss.id, iss);
+              else await addVendorIssue(userUid, iss);
+            }));
+          } catch (err) {
+            console.error('[VendorIssueModule] Failed to persist auto-imported vendor dept issues to Firestore:', err);
+            try { localStorage.setItem('vendorIssueData', JSON.stringify(newIssues)); } catch {}
+          }
+        })();
+      } else {
+        try { localStorage.setItem('vendorIssueData', JSON.stringify(newIssues)); } catch {}
+      }
+    }
+  }, [vendorDeptOrders, issues.length, userUid]);
 
   // Auto-import purchase orders
   useEffect(() => {
