@@ -70,8 +70,6 @@ const VSIRModule: React.FC = () => {
   const [autoImportEnabled, setAutoImportEnabled] = useState<boolean>(false);
   const [successMessage, setSuccessMessage] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [debugInfo, setDebugInfo] = useState<any>({});
-  const [showDebugPanel, setShowDebugPanel] = useState<boolean>(false);
 
   const initialItemInput: Omit<VSRIRecord, 'id'> = {
     receivedDate: '',
@@ -750,205 +748,50 @@ const VSIRModule: React.FC = () => {
 
   const formRef = useRef<HTMLFormElement>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    // Explicitly prevent any form reset
     e.stopPropagation();
-    if (formRef.current) {
-      // Prevent browser form reset
-      formRef.current.reset = () => {};
+
+    if (!itemInput.receivedDate || !itemInput.poNo || !itemInput.itemCode || !itemInput.itemName || itemInput.qtyReceived === 0) {
+      alert('All required fields must be filled');
+      return;
     }
 
-    console.log('[VSIR] handleSubmit called with itemInput:', itemInput);
-    console.log('[VSIR] Form event:', e);
-    console.log('[VSIR] Current itemInput state before submission:', itemInput);
-
-    // Prevent any form reset
-    if (formRef.current) {
-      console.log('[VSIR] Preventing form reset');
+    if (!userUid) {
+      alert('User not authenticated');
+      return;
     }
 
-    // Initialize debug info
-    const debugData: any = {
-      timestamp: new Date().toISOString(),
-      formData: { ...itemInput },
-      userAuthenticated: !!userUid,
-      userUid: userUid,
-      recordsCount: records.length,
-      isSubmitting: true,
-      steps: [] as string[],
-      errors: [] as string[],
-      firestoreOperations: [] as string[]
-    };
-
-    setDebugInfo(debugData);
     setIsSubmitting(true);
 
     try {
-      debugData.steps.push('Starting submission process');
-      console.log('[VSIR] Starting submission process, itemInput state:', itemInput);
-
-      // Check if user is authenticated
-      if (!userUid) {
-        const errorMsg = 'You must be logged in to save VSIR records.';
-        alert(errorMsg);
-        console.log('[VSIR] ❌ Not authenticated, cannot save');
-        debugData.errors.push('Authentication failed: No user UID');
-        setDebugInfo({ ...debugData });
-        return;
-      }
-
-      debugData.steps.push('Authentication check passed');
-      let finalItemInput = { ...itemInput };
-
-      // Vendor Batch No should ONLY be populated if invoiceDcNo is manually entered (prerequisite)
+      const finalItemInput = { ...itemInput };
       const hasInvoiceDcNo = finalItemInput.invoiceDcNo && String(finalItemInput.invoiceDcNo).trim();
-
       if (hasInvoiceDcNo && !finalItemInput.vendorBatchNo?.trim() && finalItemInput.poNo) {
         let vb = getVendorBatchNoForPO(finalItemInput.poNo);
-        if (!vb) {
-          console.log('[VSIR] Vendor Batch No not found in VendorDept for PO:', finalItemInput.poNo, '- leaving empty for manual entry or sync');
-          vb = '';
-          debugData.steps.push(`Vendor Batch No lookup failed for PO: ${finalItemInput.poNo}`);
-        } else {
-          debugData.steps.push(`Vendor Batch No found: ${vb}`);
-        }
+        if (!vb) vb = '';
         finalItemInput.vendorBatchNo = vb;
-        console.log('[VSIR] ✓ Invoice/DC No entered, vendorBatchNo set to:', vb);
-      } else if (!hasInvoiceDcNo && !finalItemInput.vendorBatchNo?.trim()) {
-        console.log('[VSIR] ✗ Invoice/DC No not entered, vendorBatchNo will remain empty');
+      } else if (!hasInvoiceDcNo) {
         finalItemInput.vendorBatchNo = '';
-        debugData.steps.push('No Invoice/DC No entered, vendor batch will be empty');
       }
 
-      debugData.finalFormData = { ...finalItemInput };
-
-      // Add or update record in local state
-      let updatedRecords: VSRIRecord[];
-      const key = makeKey(finalItemInput.poNo, finalItemInput.itemCode);
-      const existingIdx = records.findIndex(r => makeKey(r.poNo, r.itemCode) === key);
-      console.log('[VSIR] Existing record index:', existingIdx, 'key:', key);
-      debugData.existingRecordIndex = existingIdx;
-      debugData.recordKey = key;
-
-      if (existingIdx !== -1) {
-        // Update existing
-        debugData.operation = 'UPDATE';
-        updatedRecords = [...records];
-        // Use the Firestore ID if present
-        const firestoreId = records[existingIdx].id;
-        updatedRecords[existingIdx] = { ...records[existingIdx], ...finalItemInput, id: firestoreId };
-        setRecords(deduplicateVSIRRecords(updatedRecords));
-        console.log('[VSIR] Updating existing record with ID:', firestoreId);
-        debugData.steps.push(`Updating existing record with Firestore ID: ${firestoreId}`);
-
-        // Persist to Firestore
-        if (userUid && firestoreId) {
-          try {
-            console.log('[VSIR] Calling updateVSIRRecord...');
-            debugData.firestoreOperations.push('Calling updateVSIRRecord');
-            await updateVSIRRecord(userUid, String(firestoreId), { ...records[existingIdx], ...finalItemInput, id: firestoreId });
-            console.log('[VSIR] ✓ Successfully updated VSIR record in Firestore');
-            debugData.firestoreOperations.push('Update successful');
-            setSuccessMessage('VSIR record updated successfully!');
-            debugData.result = 'SUCCESS';
-          } catch (err) {
-            console.error('[VSIR] Error persisting VSIR to Firestore:', err);
-            const errorMsg = 'Error updating VSIR record: ' + (err as any)?.message || 'Unknown error';
-            setSuccessMessage(errorMsg);
-            debugData.errors.push(`Firestore update error: ${(err as any)?.message || 'Unknown error'}`);
-            debugData.result = 'FAILED';
-          }
-        } else {
-          debugData.errors.push('Missing userUid or firestoreId for update');
-          debugData.result = 'FAILED';
-        }
+      if (editIdx !== null) {
+        const record = records[editIdx];
+        if (!record || !record.id) throw new Error('Invalid record');
+        await updateVSIRRecord(userUid, String(record.id), { ...record, ...finalItemInput, id: record.id });
       } else {
-        // Add new: use Firestore-generated ID
-        debugData.operation = 'CREATE';
-        console.log('[VSIR] Adding new record...');
-        debugData.steps.push('Adding new record');
-
-        if (userUid) {
-          try {
-            console.log('[VSIR] Calling addVSIRRecord...');
-            debugData.firestoreOperations.push('Calling addVSIRRecord');
-            const firestoreId = await addVSIRRecord(userUid, { ...finalItemInput });
-            console.log('[VSIR] ✓ addVSIRRecord returned ID:', firestoreId);
-            debugData.firestoreId = firestoreId;
-
-            if (firestoreId) {
-              const newRecord = { ...finalItemInput, id: firestoreId };
-              updatedRecords = deduplicateVSIRRecords([...records, newRecord]);
-              setRecords(updatedRecords);
-              console.log('[VSIR] ✓ New record added to state with ID:', firestoreId);
-              debugData.firestoreOperations.push('Record added to local state');
-              setSuccessMessage('VSIR record added successfully!');
-              debugData.result = 'SUCCESS';
-            } else {
-              // fallback: just add with a random string id
-              const newRecord = { ...finalItemInput, id: Math.random().toString(36).slice(2) };
-              updatedRecords = deduplicateVSIRRecords([...records, newRecord]);
-              setRecords(updatedRecords);
-              console.log('[VSIR] ⚠️ Fallback: Added record with random ID');
-              debugData.firestoreOperations.push('Fallback: Added with random ID (not saved to cloud)');
-              setSuccessMessage('VSIR record added locally (not saved to cloud)');
-              debugData.result = 'PARTIAL_SUCCESS';
-            }
-          } catch (err) {
-            console.error('[VSIR] Error persisting VSIR to Firestore:', err);
-            const errorMsg = 'Error adding VSIR record: ' + (err as any)?.message || 'Unknown error';
-            setSuccessMessage(errorMsg);
-            debugData.errors.push(`Firestore add error: ${(err as any)?.message || 'Unknown error'}`);
-            debugData.result = 'FAILED';
-          }
-        } else {
-          console.log('[VSIR] ⚠️ No userUid, adding record locally only');
-          debugData.errors.push('No userUid available');
-          // Not logged in: just add with a random string id
-          const newRecord = { ...finalItemInput, id: Math.random().toString(36).slice(2) };
-          updatedRecords = deduplicateVSIRRecords([...records, newRecord]);
-          setRecords(updatedRecords);
-          debugData.result = 'LOCAL_ONLY';
-        }
+        await addVSIRRecord(userUid, finalItemInput);
       }
-
-      // Do NOT reset form after submit, so values are held
-      console.log('[VSIR] handleSubmit completed');
-      console.log('[VSIR] Final itemInput state after submission:', itemInput);
-      debugData.steps.push('Submission process completed');
-      debugData.isSubmitting = false;
-      setDebugInfo({ ...debugData });
-
-      // After successful save, keep the current values in the form
-      // Save the current record as "lastSavedRecord" for display
-      if (debugData.result === 'SUCCESS' || debugData.result === 'PARTIAL_SUCCESS') {
-        console.log('[VSIR] Record saved successfully, storing last saved record');
-        
-        // Find the just-saved record in the records array
-        const key = makeKey(finalItemInput.poNo, finalItemInput.itemCode);
-        const savedRec = records.find(r => makeKey(r.poNo, r.itemCode) === key);
-        if (savedRec) {
-          setLastSavedRecord(savedRec);
-          console.log('[VSIR] Last saved record set:', savedRec);
-        }
-      }
-
+    } catch (e) {
+      console.error('[VSIR] Error:', e);
+      alert('Error: ' + String(e));
     } finally {
       setIsSubmitting(false);
-      console.log('[VSIR] handleSubmit finally block executed, isSubmitting set to false');
-      console.log('[VSIR] itemInput state in finally:', itemInput);
-
-      // Ensure form doesn't reset
+      setItemInput(initialItemInput);
+      setEditIdx(null);
+      setLastSavedRecord(null);
       if (formRef.current) {
-        console.log('[VSIR] Ensuring form maintains values after submission');
-        // Force a re-render to ensure values are displayed
-        setTimeout(() => {
-          if (formRef.current) {
-            console.log('[VSIR] Form state check after delay:', itemInput);
-          }
-        }, 100);
+        formRef.current.reset = () => {};
       }
     }
   };
@@ -1023,137 +866,7 @@ const VSIRModule: React.FC = () => {
           <input type="checkbox" checked={autoImportEnabled} onChange={e => setAutoImportEnabled(e.target.checked)} />
           Enable Auto-Import (dangerous)
         </label>
-        <button
-          type="button"
-          onClick={() => setShowDebugPanel(!showDebugPanel)}
-          style={{
-            padding: '6px 12px',
-            background: showDebugPanel ? '#f44336' : '#2196f3',
-            color: '#fff',
-            border: 'none',
-            borderRadius: 4,
-            cursor: 'pointer'
-          }}
-        >
-          {showDebugPanel ? 'Hide' : 'Show'} Debug Panel
-        </button>
       </div>
-
-      {showDebugPanel && (
-        <div style={{
-          marginBottom: 16,
-          padding: '16px',
-          backgroundColor: '#f5f5f5',
-          border: '1px solid #ddd',
-          borderRadius: 8,
-          fontSize: '12px',
-          fontFamily: 'monospace'
-        }}>
-          <h4 style={{ margin: '0 0 12px 0', color: '#333' }}>🔍 VSIR Debug Panel</h4>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '12px' }}>
-            <div>
-              <strong>Authentication:</strong>
-              <div>User UID: {debugInfo.userUid || 'null'}</div>
-              <div>Authenticated: {debugInfo.userAuthenticated ? '✅' : '❌'}</div>
-            </div>
-
-            <div>
-              <strong>Data Status:</strong>
-              <div>Records Count: {records.length}</div>
-              <div>Is Initialized: {isInitialized ? '✅' : '❌'}</div>
-              <div>Is Submitting: {isSubmitting ? '⏳' : '✅'}</div>
-            </div>
-
-            <div>
-              <strong>Last Operation:</strong>
-              <div>Timestamp: {debugInfo.timestamp || 'None'}</div>
-              <div>Operation: {debugInfo.operation || 'None'}</div>
-              <div>Result: {
-                debugInfo.result === 'SUCCESS' ? '✅ SUCCESS' :
-                debugInfo.result === 'FAILED' ? '❌ FAILED' :
-                debugInfo.result === 'PARTIAL_SUCCESS' ? '⚠️ PARTIAL' :
-                debugInfo.result === 'LOCAL_ONLY' ? '📁 LOCAL' :
-                '⏳ PENDING'
-              }</div>
-            </div>
-          </div>
-
-          {debugInfo.formData && (
-            <div style={{ marginTop: '12px' }}>
-              <strong>Form Data:</strong>
-              <pre style={{
-                background: '#fff',
-                padding: '8px',
-                borderRadius: '4px',
-                margin: '4px 0',
-                fontSize: '11px',
-                overflow: 'auto',
-                maxHeight: '100px'
-              }}>
-                {JSON.stringify(debugInfo.formData, null, 2)}
-              </pre>
-            </div>
-          )}
-
-          {debugInfo.finalFormData && (
-            <div style={{ marginTop: '12px' }}>
-              <strong>Final Form Data (after processing):</strong>
-              <pre style={{
-                background: '#fff',
-                padding: '8px',
-                borderRadius: '4px',
-                margin: '4px 0',
-                fontSize: '11px',
-                overflow: 'auto',
-                maxHeight: '100px'
-              }}>
-                {JSON.stringify(debugInfo.finalFormData, null, 2)}
-              </pre>
-            </div>
-          )}
-
-          {debugInfo.steps && debugInfo.steps.length > 0 && (
-            <div style={{ marginTop: '12px' }}>
-              <strong>Process Steps:</strong>
-              <ul style={{ margin: '4px 0', paddingLeft: '20px' }}>
-                {debugInfo.steps.map((step: string, idx: number) => (
-                  <li key={idx}>{step}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {debugInfo.firestoreOperations && debugInfo.firestoreOperations.length > 0 && (
-            <div style={{ marginTop: '12px' }}>
-              <strong>Firestore Operations:</strong>
-              <ul style={{ margin: '4px 0', paddingLeft: '20px' }}>
-                {debugInfo.firestoreOperations.map((op: string, idx: number) => (
-                  <li key={idx}>{op}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {debugInfo.errors && debugInfo.errors.length > 0 && (
-            <div style={{ marginTop: '12px' }}>
-              <strong>❌ Errors:</strong>
-              <ul style={{ margin: '4px 0', paddingLeft: '20px', color: '#d32f2f' }}>
-                {debugInfo.errors.map((error: string, idx: number) => (
-                  <li key={idx}>{error}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          <div style={{ marginTop: '12px', fontSize: '11px', color: '#666' }}>
-            <strong>Additional Info:</strong>
-            <div>Record Key: {debugInfo.recordKey || 'N/A'}</div>
-            <div>Existing Record Index: {debugInfo.existingRecordIndex !== undefined ? debugInfo.existingRecordIndex : 'N/A'}</div>
-            <div>Firestore ID: {debugInfo.firestoreId || 'N/A'}</div>
-          </div>
-        </div>
-      )}
       {successMessage && (
         <div style={{ 
           marginBottom: 16, 
