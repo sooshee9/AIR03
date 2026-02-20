@@ -916,10 +916,19 @@ const VSIRModule: React.FC = () => {
       debugData.isSubmitting = false;
       setDebugInfo({ ...debugData });
 
-      // DEBUG: Force log current state after a delay to see if it changes
-      setTimeout(() => {
-        console.log('[VSIR-DEBUG] itemInput state 1 second after submission:', itemInput);
-      }, 1000);
+      // After successful save, optionally clear the form for the next entry
+      // OR keep the values for quick edits
+      // For now, clear the form after successful save with a message
+      if (debugData.result === 'SUCCESS' || debugData.result === 'PARTIAL_SUCCESS') {
+        console.log('[VSIR] Record saved successfully, clearing form for next entry');
+        // Don't fully reset, but keep essential values
+        // setItemInput({ ...initialItemInput, vendorName: itemInput.vendorName });
+        
+        // DEBUG: Force log current state after a delay to see if it changes
+        setTimeout(() => {
+          console.log('[VSIR-DEBUG] itemInput state 1 second after submission:', itemInput);
+        }, 1000);
+      }
 
     } finally {
       setIsSubmitting(false);
@@ -942,6 +951,22 @@ const VSIRModule: React.FC = () => {
   return (
     <div>
       <h2>VSRI Module</h2>
+
+      {/* Display saved records status */}
+      {records.length > 0 && (
+        <div style={{
+          marginBottom: 16,
+          padding: '12px',
+          backgroundColor: '#e8f5e9',
+          border: '1px solid #4caf50',
+          borderRadius: 4,
+          color: '#2e7d32',
+          fontWeight: 500
+        }}>
+          ✅ {records.length} record{records.length !== 1 ? 's' : ''} saved in Firestore
+        </div>
+      )}
+
       <div style={{ marginBottom: 16, display: 'flex', gap: 16, alignItems: 'center' }}>
         <label>
           <input type="checkbox" checked={autoDeleteEnabled} onChange={e => setAutoDeleteEnabled(e.target.checked)} />
