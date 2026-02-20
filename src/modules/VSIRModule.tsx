@@ -277,10 +277,32 @@ const VSIRModule: React.FC = () => {
             console.log('[VSIR] VSIR subscription received', docs.length, 'raw docs');
             const dedupedDocs = deduplicateVSIRRecords(docs.map(d => ({ ...d })) as VSRIRecord[]);
             console.log('[VSIR] After deduplication:', dedupedDocs.length, 'records');
-            // Always update records to ensure latest values are held
-            prevRecordsRef.current = dedupedDocs;
-            setRecords(dedupedDocs);
-            console.log('[VSIR] Records state updated, current records count:', dedupedDocs.length);
+            
+            // Merge strategy: preserve locally edited qty fields from previous state
+            setRecords(prev => {
+              if (!prev || prev.length === 0) {
+                console.log('[VSIR] No previous state, using fresh docs');
+                prevRecordsRef.current = dedupedDocs;
+                return dedupedDocs;
+              }
+              
+              // Build map of record IDs to preserve qty values
+              const map = new Map(prev.map(r => [r.id, r]));
+              
+              // Merge: keep locally edited qtys from prev state
+              const merged = dedupedDocs.map(doc => ({
+                ...doc,
+                okQty: map.get(doc.id)?.okQty ?? doc.okQty,
+                reworkQty: map.get(doc.id)?.reworkQty ?? doc.reworkQty,
+                rejectQty: map.get(doc.id)?.rejectQty ?? doc.rejectQty,
+              }));
+              
+              prevRecordsRef.current = merged;
+              console.log('[VSIR] Merged snapshot with preserved qty values');
+              return merged;
+            });
+            
+            console.log('[VSIR] Records state updated via merge');
           } catch (e) { console.error('[VSIR] Error mapping vsir docs', e); }
         });
 
@@ -479,7 +501,13 @@ const VSIRModule: React.FC = () => {
             if (match?.vendorBatchNo) {
               console.log(`[VSIR-DEBUG] ✓ SYNC: Found match for PO ${record.poNo}, syncing vendorBatchNo: ${match.vendorBatchNo}`);
               updated = true;
-              return { ...record, vendorBatchNo: match.vendorBatchNo };
+              return {
+                ...record,
+                vendorBatchNo: match.vendorBatchNo ?? record.vendorBatchNo,
+                okQty: record.okQty,
+                reworkQty: record.reworkQty,
+                rejectQty: record.rejectQty
+              };
             } else {
               console.log(`[VSIR-DEBUG] ✗ No matching VendorDept record found for PO ${record.poNo} (match.vendorBatchNo is falsy)`);
             }
@@ -594,6 +622,12 @@ const VSIRModule: React.FC = () => {
   const runImport = async (providedSource?: any[]) => {
     if (!userUid) {
       console.log('[VSIR] Manual import skipped: no userUid');
+      return;
+    }
+
+    // Guard: Don't import if records already exist (prevent overwriting manual edits)
+    if (records.length > 0) {
+      console.log('[VSIR] Import skipped — records already exist (', records.length, 'records). Use manual import only for initial setup.');
       return;
     }
 
@@ -728,7 +762,14 @@ const VSIRModule: React.FC = () => {
 
           if (oaNo !== record.oaNo || batchNo !== record.purchaseBatchNo) {
             updated = true;
-            return { ...record, oaNo, purchaseBatchNo: batchNo };
+            return {
+              ...record,
+              oaNo: oaNo ?? record.oaNo,
+              purchaseBatchNo: batchNo ?? record.purchaseBatchNo,
+              okQty: record.okQty,
+              reworkQty: record.reworkQty,
+              rejectQty: record.rejectQty
+            };
           }
         }
         return record;
@@ -889,7 +930,9 @@ const VSIRModule: React.FC = () => {
 
   const handleEdit = (idx: number) => {
     const record = records[idx];
-    let edited = { ...record };
+    // IMPORTANT: Strip Firestore metadata fields (id, createdAt, updatedAt) 
+    // to keep itemInput clean and prevent them from being sent back to Firestore
+    const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...edited } = record as any;
 
     if (!edited.vendorBatchNo?.trim() && edited.poNo) {
       let vb = getVendorBatchNoForPO(edited.poNo);
@@ -897,7 +940,8 @@ const VSIRModule: React.FC = () => {
       edited.vendorBatchNo = vb;
     }
 
-    console.log('[VSIR] handleEdit loading record:', edited);
+    console.log('[VSIR] handleEdit loading record (cleaned):', edited);
+    console.log('[VSIR] Excluded Firestore fields - id:', _id, ', createdAt:', _createdAt, ', updatedAt:', _updatedAt);
     setItemInput(edited);
     setEditIdx(idx);
     setLastSavedRecord(record);
@@ -1132,6 +1176,7 @@ const VSIRModule: React.FC = () => {
       )}
       <form
         ref={formRef}
+        key={`vsir-form-${editIdx}`}
         onSubmit={handleSubmit}
         onReset={(e) => {
           e.preventDefault();
