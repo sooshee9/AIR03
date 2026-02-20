@@ -73,7 +73,7 @@ const VSIRModule: React.FC = () => {
   const [debugInfo, setDebugInfo] = useState<any>({});
   const [showDebugPanel, setShowDebugPanel] = useState<boolean>(false);
 
-  const [itemInput, setItemInput] = useState<Omit<VSRIRecord, 'id'>>({
+  const initialItemInput: Omit<VSRIRecord, 'id'> = {
     receivedDate: '',
     indentNo: '',
     poNo: '',
@@ -91,7 +91,10 @@ const VSIRModule: React.FC = () => {
     rejectQty: 0,
     grnNo: '',
     remarks: '',
-  });
+  };
+
+  const [itemInput, setItemInput] = useState<Omit<VSRIRecord, 'id'>>(initialItemInput);
+  const [lastSavedRecord, setLastSavedRecord] = useState<VSRIRecord | null>(null);
 
   // Clear success message after 3 seconds
   useEffect(() => {
@@ -739,8 +742,10 @@ const VSIRModule: React.FC = () => {
       edited.vendorBatchNo = vb;
     }
 
+    console.log('[VSIR] handleEdit loading record:', edited);
     setItemInput(edited);
     setEditIdx(idx);
+    setLastSavedRecord(record);
   };
 
   const formRef = useRef<HTMLFormElement>(null);
@@ -916,18 +921,18 @@ const VSIRModule: React.FC = () => {
       debugData.isSubmitting = false;
       setDebugInfo({ ...debugData });
 
-      // After successful save, optionally clear the form for the next entry
-      // OR keep the values for quick edits
-      // For now, clear the form after successful save with a message
+      // After successful save, keep the current values in the form
+      // Save the current record as "lastSavedRecord" for display
       if (debugData.result === 'SUCCESS' || debugData.result === 'PARTIAL_SUCCESS') {
-        console.log('[VSIR] Record saved successfully, clearing form for next entry');
-        // Don't fully reset, but keep essential values
-        // setItemInput({ ...initialItemInput, vendorName: itemInput.vendorName });
+        console.log('[VSIR] Record saved successfully, storing last saved record');
         
-        // DEBUG: Force log current state after a delay to see if it changes
-        setTimeout(() => {
-          console.log('[VSIR-DEBUG] itemInput state 1 second after submission:', itemInput);
-        }, 1000);
+        // Find the just-saved record in the records array
+        const key = makeKey(finalItemInput.poNo, finalItemInput.itemCode);
+        const savedRec = records.find(r => makeKey(r.poNo, r.itemCode) === key);
+        if (savedRec) {
+          setLastSavedRecord(savedRec);
+          console.log('[VSIR] Last saved record set:', savedRec);
+        }
       }
 
     } finally {
@@ -964,6 +969,48 @@ const VSIRModule: React.FC = () => {
           fontWeight: 500
         }}>
           ✅ {records.length} record{records.length !== 1 ? 's' : ''} saved in Firestore
+        </div>
+      )}
+
+      {/* Display last saved record details */}
+      {lastSavedRecord && (
+        <div style={{
+          marginBottom: 16,
+          padding: '12px',
+          backgroundColor: '#fff3e0',
+          border: '2px solid #ff9800',
+          borderRadius: 4,
+          color: '#e65100'
+        }}>
+          <strong>Last Saved Record:</strong>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '8px', marginTop: '8px', fontSize: '12px' }}>
+            <div><strong>PO No:</strong> {lastSavedRecord.poNo}</div>
+            <div><strong>Item Code:</strong> {lastSavedRecord.itemCode}</div>
+            <div><strong>Item Name:</strong> {lastSavedRecord.itemName}</div>
+            <div><strong>Qty Received:</strong> {lastSavedRecord.qtyReceived}</div>
+            <div><strong>OK Qty:</strong> {lastSavedRecord.okQty}</div>
+            <div><strong>Rework Qty:</strong> {lastSavedRecord.reworkQty}</div>
+            <div><strong>Reject Qty:</strong> {lastSavedRecord.rejectQty}</div>
+            <div><strong>GRN No:</strong> {lastSavedRecord.grnNo}</div>
+            <div><strong>Vendor:</strong> {lastSavedRecord.vendorName}</div>
+            <div><strong>OA No:</strong> {lastSavedRecord.oaNo}</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setLastSavedRecord(null)}
+            style={{
+              marginTop: '8px',
+              padding: '4px 12px',
+              background: '#ff9800',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 4,
+              cursor: 'pointer',
+              fontSize: '12px'
+            }}
+          >
+            Dismiss
+          </button>
         </div>
       )}
 
@@ -1194,6 +1241,28 @@ const VSIRModule: React.FC = () => {
           }}
         >
           Debug State
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            console.log('[VSIR] Clearing form for new entry');
+            setItemInput(initialItemInput);
+            setEditIdx(null);
+            setLastSavedRecord(null);
+          }}
+          style={{
+            padding: '10px 24px',
+            background: '#9c27b0',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 4,
+            fontWeight: 500,
+            marginTop: 24,
+            marginLeft: 8,
+            cursor: 'pointer'
+          }}
+        >
+          Clear Form
         </button>
       </form>
       <div style={{ overflowX: 'auto' }}>
