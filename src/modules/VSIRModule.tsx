@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../firebase';
 import { subscribePsirs } from '../utils/psirService';
-import { subscribeVSIRRecords, addVSIRRecord, updateVSIRRecord, deleteVSIRRecord, subscribeVendorDepts, getItemMaster, getVendorIssues, subscribePurchaseData, subscribePurchaseOrders } from '../utils/firestoreServices';
+import { subscribeVSIRRecords, addVSIRRecord, updateVSIRRecord, deleteVSIRRecord, subscribeVendorDepts, getItemMaster, getVendorIssues, subscribePurchaseData, subscribePurchaseOrders, updateVendorDept } from '../utils/firestoreServices';
 import bus from '../utils/eventBus';
 
 interface VSRIRecord {
@@ -939,6 +939,65 @@ const VSIRModule: React.FC = () => {
         await addVSIRRecord(userUid, finalItemInput);
         console.log('[VSIR] Add successful');
         setSuccessMessage('Record added successfully!');
+      }
+
+      // Sync OK Qty to Vendor Dept (for both add and update operations)
+      if (finalItemInput.okQty > 0 && finalItemInput.poNo && finalItemInput.itemCode) {
+        try {
+          const operation = editIdx !== null ? 'UPDATE' : 'ADD';
+          console.log(`[VSIR-${operation}] Syncing OK Qty to Vendor Dept:`, {
+            poNo: finalItemInput.poNo,
+            itemCode: finalItemInput.itemCode,
+            okQty: finalItemInput.okQty
+          });
+
+          // Find matching Vendor Dept record
+          const vendorDeptMatch = vendorDeptOrders.find(vd =>
+            String(vd.materialPurchasePoNo || '').trim() === String(finalItemInput.poNo || '').trim()
+          );
+
+          if (vendorDeptMatch && vendorDeptMatch.id) {
+            // Find matching item within the Vendor Dept record
+            const itemIndex = vendorDeptMatch.items?.findIndex(item =>
+              String(item.itemCode || '').trim() === String(finalItemInput.itemCode || '').trim()
+            );
+
+            if (itemIndex !== undefined && itemIndex >= 0) {
+              // Update the OK Qty for this item
+              const updatedItems = [...(vendorDeptMatch.items || [])];
+              updatedItems[itemIndex] = {
+                ...updatedItems[itemIndex],
+                okQty: finalItemInput.okQty
+              };
+
+              const updatedVendorDept = {
+                ...vendorDeptMatch,
+                items: updatedItems
+              };
+
+              console.log(`[VSIR-${operation}] Updating Vendor Dept OK Qty:`, {
+                vendorDeptId: vendorDeptMatch.id,
+                itemIndex,
+                newOkQty: finalItemInput.okQty
+              });
+
+              await updateVendorDept(userUid, vendorDeptMatch.id, updatedVendorDept);
+              console.log(`[VSIR-${operation}] Vendor Dept OK Qty sync successful`);
+
+              // Dispatch event to notify other modules
+              bus.dispatchEvent(new CustomEvent('vendorDept.updated', {
+                detail: { updatedRecord: updatedVendorDept }
+              }));
+            } else {
+              console.log(`[VSIR-${operation}] No matching item found in Vendor Dept for itemCode:`, finalItemInput.itemCode);
+            }
+          } else {
+            console.log(`[VSIR-${operation}] No matching Vendor Dept record found for PO:`, finalItemInput.poNo);
+          }
+        } catch (syncError) {
+          console.error('[VSIR] Error syncing OK Qty to Vendor Dept:', syncError);
+          // Don't fail the whole operation for sync errors
+        }
       }
     } catch (e) {
       console.error('[VSIR] Error during save:', e);
