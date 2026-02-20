@@ -743,11 +743,18 @@ const VSIRModule: React.FC = () => {
     setEditIdx(idx);
   };
 
+  const formRef = useRef<HTMLFormElement>(null);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     console.log('[VSIR] handleSubmit called with itemInput:', itemInput);
     console.log('[VSIR] Form event:', e);
     console.log('[VSIR] Current itemInput state before submission:', itemInput);
+
+    // Prevent any form reset
+    if (formRef.current) {
+      console.log('[VSIR] Preventing form reset');
+    }
 
     // Initialize debug info
     const debugData: any = {
@@ -900,6 +907,11 @@ const VSIRModule: React.FC = () => {
       debugData.steps.push('Submission process completed');
       debugData.isSubmitting = false;
       setDebugInfo({ ...debugData });
+
+      // DEBUG: Force log current state after a delay to see if it changes
+      setTimeout(() => {
+        console.log('[VSIR-DEBUG] itemInput state 1 second after submission:', itemInput);
+      }, 1000);
 
     } finally {
       setIsSubmitting(false);
@@ -1063,14 +1075,17 @@ const VSIRModule: React.FC = () => {
           {successMessage}
         </div>
       )}
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 24 }}>
-        {VSRI_MODULE_FIELDS.map((field) => (
+      <form ref={formRef} onSubmit={handleSubmit} style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 24 }}>
+        {VSRI_MODULE_FIELDS.map((field) => {
+          const fieldValue = (itemInput as any)[field.key];
+          console.log(`[VSIR-RENDER] Field ${field.key} =`, fieldValue, 'type:', typeof fieldValue);
+          return (
           <div key={field.key} style={{ flex: '1 1 200px', minWidth: 180 }}>
             <label style={{ display: 'block', marginBottom: 4 }}>{field.label}</label>
             {field.key === 'itemName' && itemNames.length > 0 ? (
               <select
                 name="itemName"
-                value={itemInput.itemName}
+                value={itemInput.itemName || ''}
                 onChange={handleChange}
                 style={{ width: '100%', padding: 6, borderRadius: 4, border: '1px solid #bbb' }}
               >
@@ -1083,13 +1098,14 @@ const VSIRModule: React.FC = () => {
               <input
                 type={field.type}
                 name={field.key}
-                value={(itemInput as any)[field.key]}
+                value={fieldValue || ''}
                 onChange={handleChange}
                 style={{ width: '100%', padding: 6, borderRadius: 4, border: '1px solid #bbb' }}
               />
             )}
           </div>
-        ))}
+        );
+        })}
         <button 
           type="submit" 
           disabled={isSubmitting}
@@ -1105,6 +1121,26 @@ const VSIRModule: React.FC = () => {
           }}
         >
           {isSubmitting ? 'Saving...' : (editIdx !== null ? 'Update' : 'Add')}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            console.log('[VSIR-DEBUG] Current itemInput state:', itemInput);
+            alert('Check console for current itemInput state');
+          }}
+          style={{
+            padding: '10px 24px',
+            background: '#ff9800',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 4,
+            fontWeight: 500,
+            marginTop: 24,
+            marginLeft: 16,
+            cursor: 'pointer'
+          }}
+        >
+          Debug State
         </button>
       </form>
       <div style={{ overflowX: 'auto' }}>
