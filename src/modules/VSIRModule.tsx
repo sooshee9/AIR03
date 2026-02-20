@@ -94,6 +94,11 @@ const VSIRModule: React.FC = () => {
   const [itemInput, setItemInput] = useState<Omit<VSRIRecord, 'id'>>(initialItemInput);
   const [lastSavedRecord, setLastSavedRecord] = useState<VSRIRecord | null>(null);
 
+  // Debug itemInput changes
+  useEffect(() => {
+    console.log('[VSIR-DEBUG] itemInput state changed:', itemInput);
+  }, [itemInput]);
+
   // Clear success message after 3 seconds
   useEffect(() => {
     if (successMessage) {
@@ -313,7 +318,12 @@ const VSIRModule: React.FC = () => {
           return;
         }
         console.log('[VSIR-DEBUG] VendorDept records:', vendorDepts.map((vd: any) => ({ po: vd.materialPurchasePoNo, vendorBatchNo: vd.vendorBatchNo })));
-        console.log('[VSIR-DEBUG] Raw VendorDept records:', vendorDepts);
+        console.log('[VSIR-DEBUG] Raw VendorDept records:', vendorDepts.map((vd: any) => ({
+          id: vd.id,
+          materialPurchasePoNo: vd.materialPurchasePoNo,
+          vendorBatchNo: vd.vendorBatchNo,
+          allKeys: Object.keys(vd)
+        })));
         console.log('[VSIR-DEBUG] Current VSIR records:', records.map(r => ({ poNo: r.poNo, vendorBatchNo: r.vendorBatchNo, invoiceDcNo: r.invoiceDcNo, itemCode: r.itemCode })));
         
         let updated = false;
@@ -916,7 +926,6 @@ const VSIRModule: React.FC = () => {
       )}
       <form
         ref={formRef}
-        key={`vsir-form-${editIdx}`}
         onSubmit={handleSubmit}
         onReset={(e) => {
           e.preventDefault();
