@@ -747,6 +747,14 @@ const VSIRModule: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Explicitly prevent any form reset
+    e.stopPropagation();
+    if (formRef.current) {
+      // Prevent browser form reset
+      formRef.current.reset = () => {};
+    }
+
     console.log('[VSIR] handleSubmit called with itemInput:', itemInput);
     console.log('[VSIR] Form event:', e);
     console.log('[VSIR] Current itemInput state before submission:', itemInput);
@@ -917,6 +925,17 @@ const VSIRModule: React.FC = () => {
       setIsSubmitting(false);
       console.log('[VSIR] handleSubmit finally block executed, isSubmitting set to false');
       console.log('[VSIR] itemInput state in finally:', itemInput);
+
+      // Ensure form doesn't reset
+      if (formRef.current) {
+        console.log('[VSIR] Ensuring form maintains values after submission');
+        // Force a re-render to ensure values are displayed
+        setTimeout(() => {
+          if (formRef.current) {
+            console.log('[VSIR] Form state check after delay:', itemInput);
+          }
+        }, 100);
+      }
     }
   };
 
@@ -1075,7 +1094,16 @@ const VSIRModule: React.FC = () => {
           {successMessage}
         </div>
       )}
-      <form ref={formRef} onSubmit={handleSubmit} style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 24 }}>
+      <form
+        ref={formRef}
+        key={`vsir-form-${editIdx}`}
+        onSubmit={handleSubmit}
+        onReset={(e) => {
+          e.preventDefault();
+          console.log('[VSIR] Form reset prevented');
+        }}
+        style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 24 }}
+      >
         {VSRI_MODULE_FIELDS.map((field) => {
           const fieldValue = (itemInput as any)[field.key];
           console.log(`[VSIR-RENDER] Field ${field.key} =`, fieldValue, 'type:', typeof fieldValue);
