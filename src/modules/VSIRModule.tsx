@@ -174,23 +174,6 @@ const VSIRModule: React.FC = () => {
     console.groupEnd();
   };
 
-  // Make debug panel available globally for easy access
-  useEffect(() => {
-    (window as any).vsirDebug = showDebugPanel;
-    console.log('🔧 VSIR Debug Panel available! Run vsirDebug() in console or press Ctrl+Shift+D to view current state.');
-    
-    // Add keyboard shortcut for debug panel
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && e.key === 'D') {
-        e.preventDefault();
-        showDebugPanel();
-      }
-    };
-    
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [itemInput, vendorDeptOrders, records, userUid, isInitialized, isSubmitting, editIdx, autoDeleteEnabled, autoImportEnabled, successMessage]);
-
   const initialItemInput: Omit<VSRIRecord, 'id'> = {
     receivedDate: '',
     indentNo: '',
@@ -219,6 +202,23 @@ const VSIRModule: React.FC = () => {
     console.log('[VSIR-DEBUG] itemInput state changed:', itemInput);
   }, [itemInput]);
 
+  // Make debug panel available globally for easy access
+  useEffect(() => {
+    (window as any).vsirDebug = showDebugPanel;
+    console.log('🔧 VSIR Debug Panel available! Run vsirDebug() in console or press Ctrl+Shift+D to view current state.');
+    
+    // Add keyboard shortcut for debug panel
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'D') {
+        e.preventDefault();
+        showDebugPanel();
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [itemInput, vendorDeptOrders, records, userUid, isInitialized, isSubmitting, editIdx, autoDeleteEnabled, autoImportEnabled, successMessage]);
+
   // Clear success message after 3 seconds
   useEffect(() => {
     if (successMessage) {
@@ -227,10 +227,6 @@ const VSIRModule: React.FC = () => {
     }
   }, [successMessage]);
 
-  // Debug: Monitor itemInput changes
-  useEffect(() => {
-    console.log('[VSIR-DEBUG] itemInput state changed:', itemInput);
-  }, [itemInput]);
   // Track existing PO+ItemCode combinations to prevent duplicates during import
   const existingCombinationsRef = useRef<Set<string>>(new Set());
   // Ref to track previous records to prevent unnecessary re-renders
