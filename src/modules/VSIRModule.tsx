@@ -68,6 +68,16 @@ const VSIRModule: React.FC = () => {
   // Robustness toggles (move outside of itemInput)
   const [autoDeleteEnabled, setAutoDeleteEnabled] = useState<boolean>(false);
   const [autoImportEnabled, setAutoImportEnabled] = useState<boolean>(false);
+  const [successMessage, setSuccessMessage] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  // Clear success message after 3 seconds
+  useEffect(() => {
+    if (successMessage) {
+      const timer = setTimeout(() => setSuccessMessage(''), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [successMessage]);
   const [itemInput, setItemInput] = useState<Omit<VSRIRecord, 'id'>>({
     receivedDate: '',
     indentNo: '',
@@ -718,6 +728,9 @@ const VSIRModule: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     console.log('[VSIR] handleSubmit called with itemInput:', itemInput);
+    setIsSubmitting(true);
+
+    try {
 
     // Check if user is authenticated
     if (!userUid) {
@@ -769,10 +782,12 @@ const VSIRModule: React.FC = () => {
           console.log('[VSIR] Calling updateVSIRRecord...');
           await updateVSIRRecord(userUid, String(firestoreId), { ...records[existingIdx], ...finalItemInput, id: firestoreId });
           console.log('[VSIR] ✓ Successfully updated VSIR record in Firestore');
-          alert('VSIR record updated successfully!');
+          setSuccessMessage('VSIR record updated successfully!');
+          // alert('VSIR record updated successfully!');
         } catch (err) {
           console.error('[VSIR] Error persisting VSIR to Firestore:', err);
-          alert('Error updating VSIR record: ' + (err as any)?.message || 'Unknown error');
+          setSuccessMessage('Error updating VSIR record: ' + (err as any)?.message || 'Unknown error');
+          // alert('Error updating VSIR record: ' + (err as any)?.message || 'Unknown error');
         }
       }
     } else {
@@ -788,18 +803,21 @@ const VSIRModule: React.FC = () => {
             updatedRecords = deduplicateVSIRRecords([...records, newRecord]);
             setRecords(updatedRecords);
             console.log('[VSIR] ✓ New record added to state with ID:', firestoreId);
-            alert('VSIR record added successfully!');
+            setSuccessMessage('VSIR record added successfully!');
+            // alert('VSIR record added successfully!');
           } else {
             // fallback: just add with a random string id
             const newRecord = { ...finalItemInput, id: Math.random().toString(36).slice(2) };
             updatedRecords = deduplicateVSIRRecords([...records, newRecord]);
             setRecords(updatedRecords);
             console.log('[VSIR] ⚠️ Fallback: Added record with random ID');
-            alert('VSIR record added locally (not saved to cloud)');
+            setSuccessMessage('VSIR record added locally (not saved to cloud)');
+            // alert('VSIR record added locally (not saved to cloud)');
           }
         } catch (err) {
           console.error('[VSIR] Error persisting VSIR to Firestore:', err);
-          alert('Error adding VSIR record: ' + (err as any)?.message || 'Unknown error');
+          setSuccessMessage('Error adding VSIR record: ' + (err as any)?.message || 'Unknown error');
+          // alert('Error adding VSIR record: ' + (err as any)?.message || 'Unknown error');
         }
       } else {
         console.log('[VSIR] ⚠️ No userUid, adding record locally only');
@@ -811,7 +829,9 @@ const VSIRModule: React.FC = () => {
     }
     // Do NOT reset form after submit, so values are held
     console.log('[VSIR] handleSubmit completed');
-  };
+  } finally {
+    setIsSubmitting(false);
+  }
 
 
   return (
@@ -830,6 +850,18 @@ const VSIRModule: React.FC = () => {
       <div style={{ marginBottom: 16, color: 'red' }}>
         Debug: userUid = {userUid || 'null'}, records count = {records.length}
       </div>
+      {successMessage && (
+        <div style={{ 
+          marginBottom: 16, 
+          padding: '10px', 
+          backgroundColor: successMessage.includes('Error') ? '#ffebee' : '#e8f5e8', 
+          border: `1px solid ${successMessage.includes('Error') ? '#f44336' : '#4caf50'}`, 
+          borderRadius: 4,
+          color: successMessage.includes('Error') ? '#c62828' : '#2e7d32'
+        }}>
+          {successMessage}
+        </div>
+      )}
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 24 }}>
         {VSRI_MODULE_FIELDS.map((field) => (
           <div key={field.key} style={{ flex: '1 1 200px', minWidth: 180 }}>
@@ -857,8 +889,21 @@ const VSIRModule: React.FC = () => {
             )}
           </div>
         ))}
-        <button type="submit" style={{ padding: '10px 24px', background: '#1a237e', color: '#fff', border: 'none', borderRadius: 4, fontWeight: 500, marginTop: 24 }}>
-          {editIdx !== null ? 'Update' : 'Add'}
+        <button 
+          type="submit" 
+          disabled={isSubmitting}
+          style={{ 
+            padding: '10px 24px', 
+            background: isSubmitting ? '#ccc' : '#1a237e', 
+            color: '#fff', 
+            border: 'none', 
+            borderRadius: 4, 
+            fontWeight: 500, 
+            marginTop: 24,
+            cursor: isSubmitting ? 'not-allowed' : 'pointer'
+          }}
+        >
+          {isSubmitting ? 'Saving...' : (editIdx !== null ? 'Update' : 'Add')}
         </button>
       </form>
       <div style={{ overflowX: 'auto' }}>
