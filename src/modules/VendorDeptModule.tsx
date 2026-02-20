@@ -528,15 +528,23 @@ const VendorDeptModule: React.FC = () => {
 
 	// Auto-fill Received, OK, Rework, and Rejected quantities from VSIR
 	useEffect(() => {
-		if (!newOrder.materialPurchasePoNo || !itemInput.itemCode) return;
+		console.log('[VendorDept][AutoFill] useEffect triggered. PO:', newOrder.materialPurchasePoNo, 'Item:', itemInput.itemCode);
+		if (!newOrder.materialPurchasePoNo || !itemInput.itemCode) {
+			console.log('[VendorDept][AutoFill] Missing PO or itemCode, skipping');
+			return;
+		}
 		
 		try {
+			console.log('[VendorDept][AutoFill] VSIR records count:', vsirRecords?.length || 0);
 			if (!vsirRecords) {
 				console.debug('[VendorDeptModule][AutoFill] No VSIR records found');
 				return;
 			}
 			
-			if (!Array.isArray(vsirRecords)) return;
+			if (!Array.isArray(vsirRecords)) {
+				console.log('[VendorDept][AutoFill] vsirRecords is not an array');
+				return;
+			}
 			
 			// Find matching VSIR record for this PO and item (robust: trim, uppercase)
 			const norm = (v: any) => (v === undefined || v === null) ? '' : String(v).trim().toUpperCase();
@@ -591,29 +599,38 @@ const VendorDeptModule: React.FC = () => {
 								});
 						}
 			{/* Debug Panel for OK Qty auto-fill */}
-			{debugOkQty && (
-				<div style={{ margin: '16px 0', padding: 12, background: '#e3f2fd', border: '2px solid #1976d2', borderRadius: 4 }}>
-					<h4 style={{ margin: '0 0 8px 0', color: '#1976d2' }}>🛠️ OK Qty Auto-Fill Debug Panel</h4>
-					<div style={{ fontSize: 13, marginBottom: 6 }}>
-						<strong>PO No:</strong> {debugOkQty.poNo} &nbsp; <strong>Item Code:</strong> {debugOkQty.itemCode}
-					</div>
-					<div style={{ fontSize: 13, marginBottom: 6 }}>
-						<strong>VSIR Match:</strong> {debugOkQty.matchingVSIR ? '✅ Found' : '❌ Not Found'}
-					</div>
-					<div style={{ fontSize: 13, marginBottom: 6 }}>
-						<strong>Auto-filled OK Qty:</strong> {debugOkQty.okQty ?? '—'}
-					</div>
-					<div style={{ fontSize: 13, marginBottom: 6 }}>
-						<strong>Reason:</strong> {debugOkQty.debugReason}
-					</div>
-					{debugOkQty.matchingVSIR && (
-						<details style={{ fontSize: 12, marginTop: 6 }}>
-							<summary>Show VSIR Record</summary>
-							<pre style={{ background: '#f5f5f5', padding: 6, borderRadius: 3, fontSize: 11, margin: 0 }}>{JSON.stringify(debugOkQty.matchingVSIR, null, 2)}</pre>
-						</details>
-					)}
+			<div style={{ margin: '16px 0', padding: 12, background: '#e3f2fd', border: '2px solid #1976d2', borderRadius: 4 }}>
+				<h4 style={{ margin: '0 0 8px 0', color: '#1976d2' }}>🛠️ OK Qty Auto-Fill Debug Panel</h4>
+				<div style={{ fontSize: 13, marginBottom: 6 }}>
+					<strong>Current PO:</strong> {newOrder.materialPurchasePoNo || '—'} &nbsp; <strong>Current Item Code:</strong> {itemInput.itemCode || '—'}
 				</div>
-			)}
+				<div style={{ fontSize: 13, marginBottom: 6 }}>
+					<strong>VSIR Records Loaded:</strong> {vsirRecords ? vsirRecords.length : 0}
+				</div>
+				{debugOkQty ? (
+					<>
+						<div style={{ fontSize: 13, marginBottom: 6 }}>
+							<strong>VSIR Match:</strong> {debugOkQty.matchingVSIR ? '✅ Found' : '❌ Not Found'}
+						</div>
+						<div style={{ fontSize: 13, marginBottom: 6 }}>
+							<strong>Auto-filled OK Qty:</strong> {debugOkQty.okQty ?? '—'}
+						</div>
+						<div style={{ fontSize: 13, marginBottom: 6 }}>
+							<strong>Reason:</strong> {debugOkQty.debugReason}
+						</div>
+						{debugOkQty.matchingVSIR && (
+							<details style={{ fontSize: 12, marginTop: 6 }}>
+								<summary>Show VSIR Record</summary>
+								<pre style={{ background: '#f5f5f5', padding: 6, borderRadius: 3, fontSize: 11, margin: 0 }}>{JSON.stringify(debugOkQty.matchingVSIR, null, 2)}</pre>
+							</details>
+						)}
+					</>
+				) : (
+					<div style={{ fontSize: 13, color: '#666' }}>
+						No auto-fill attempted yet (waiting for PO and Item Code)
+					</div>
+				)}
+			</div>
 		} catch (e) {
 			console.error('[VendorDeptModule][AutoFill] Error reading VSIR data:', e);
 		}
