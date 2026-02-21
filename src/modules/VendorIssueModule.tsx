@@ -326,9 +326,34 @@ const VendorIssueModule: React.FC = () => {
         if (vsirVB) { newVendorBatchNo = vsirVB; needsUpdate = true; }
       }
 
+      // *** FIX: patch items where qty=0 — try vendorDeptOrders.plannedQty first, then purchaseOrders ***
+      const newItems = issue.items.map(item => {
+        if (item.qty > 0) return item;
+        let resolvedQty = 0;
+        // 1. vendorDeptOrders plannedQty
+        if (match && Array.isArray(match.items)) {
+          const deptItem = match.items.find((di: any) =>
+            (di.itemCode && item.itemCode && String(di.itemCode).trim() === String(item.itemCode).trim()) ||
+            (di.itemName && String(di.itemName).trim() === String(item.itemName).trim())
+          );
+          if (deptItem) resolvedQty = (typeof deptItem.plannedQty === 'number' && deptItem.plannedQty > 0) ? deptItem.plannedQty : Number(deptItem.qty) || 0;
+        }
+        // 2. purchaseOrders entry
+        if (!resolvedQty) {
+          const poEntry = purchaseOrders.find((po: any) =>
+            String(po.poNo || '').trim() === String(issue.materialPurchasePoNo || '').trim() &&
+            (String(po.itemCode || '').trim() === String(item.itemCode || '').trim() ||
+             String(po.itemName || po.model || '').trim() === String(item.itemName || '').trim())
+          );
+          if (poEntry) resolvedQty = Number(poEntry.plannedQty) || Number(poEntry.purchaseQty) || Number(poEntry.originalIndentQty) || Number(poEntry.poQty) || Number(poEntry.qty) || 0;
+        }
+        if (resolvedQty > 0) { needsUpdate = true; return { ...item, qty: resolvedQty }; }
+        return item;
+      });
+
       if (needsUpdate) {
         updated = true;
-        return { ...issue, vendorName: newVendorName, vendorBatchNo: newVendorBatchNo, batchNo: newBatchNo, oaNo: newOaNo };
+        return { ...issue, vendorName: newVendorName, vendorBatchNo: newVendorBatchNo, batchNo: newBatchNo, oaNo: newOaNo, items: newItems };
       }
       return issue;
     });
@@ -350,7 +375,7 @@ const VendorIssueModule: React.FC = () => {
         })();
       }
     }
-  }, [vendorDeptOrders, psirData, vsirRecords]); // *** FIX: depend on psirData ***
+  }, [vendorDeptOrders, psirData, vsirRecords, purchaseOrders]); // also depends on purchaseOrders for qty backfill
 
   useEffect(() => {
     if (
@@ -373,6 +398,7 @@ const VendorIssueModule: React.FC = () => {
   }, [newIssue, issues, vendorDeptOrders]);
 
   useEffect(() => {
+    // *** FIX: wait for vendorDeptOrders to be loaded before importing, so plannedQty is available ***
     if (purchaseOrders.length === 0 || !userUid) return;
 
     const poGroups: Record<string, any[]> = {};
@@ -390,7 +416,22 @@ const VendorIssueModule: React.FC = () => {
     Object.keys(poGroups).forEach(poNo => {
       if (!existingPOs.has(poNo)) {
         const group = poGroups[poNo];
-        const items = group.map((item: any) => ({ itemName: item.itemName || item.model || '', itemCode: item.itemCode || '', qty: item.qty || 0, indentBy: item.indentBy || '', inStock: 0, indentClosed: false }));
+        // *** FIX: resolve qty from multiple field names, cross-ref vendorDeptOrders plannedQty ***
+        const deptMatchForQty = vendorDeptOrders.find(order => order.materialPurchasePoNo === poNo);
+        const items = group.map((item: any) => {
+          let resolvedQty = 0;
+          // 1. Check vendorDeptOrders.items[].plannedQty (most authoritative)
+          if (deptMatchForQty && Array.isArray(deptMatchForQty.items)) {
+            const deptItem = deptMatchForQty.items.find((di: any) =>
+              (di.itemCode && item.itemCode && String(di.itemCode).trim() === String(item.itemCode).trim()) ||
+              (di.itemName && String(di.itemName).trim() === String(item.itemName || item.model || '').trim())
+            );
+            if (deptItem && typeof deptItem.plannedQty === 'number' && deptItem.plannedQty > 0) resolvedQty = deptItem.plannedQty;
+          }
+          // 2. Try multiple field names from the purchase entry itself
+          if (!resolvedQty) resolvedQty = Number(item.plannedQty) || Number(item.purchaseQty) || Number(item.originalIndentQty) || Number(item.poQty) || Number(item.qty) || 0;
+          return { itemName: item.itemName || item.model || '', itemCode: item.itemCode || '', qty: resolvedQty, indentBy: item.indentBy || '', inStock: 0, indentClosed: false };
+        });
         const first = group[0];
         const match = vendorDeptOrders.find(order => order.materialPurchasePoNo === poNo);
         const dcNo = (match && match.dcNo && String(match.dcNo).trim() !== '') ? String(match.dcNo) : getNextDCNo(newIssues);
@@ -435,12 +476,19 @@ const VendorIssueModule: React.FC = () => {
       if (userUid) {
         (async () => {
           try {
-            await Promise.all(deduped.map(async (iss: any) => { if (iss.id) await updateVendorIssue(userUid, iss.id, iss); else await addVendorIssue(userUid, iss); }));
+            await Promise.all(deduped.map(async (iss: any) => {
+              // *** FIX: only write to Firestore if items have qty resolved — otherwise the
+              //     sync effect will backfill qty and write then, avoiding a qty=0 save ***
+              const allQtyZero = Array.isArray(iss.items) && iss.items.length > 0 && iss.items.every((it: any) => !it.qty || it.qty === 0);
+              if (allQtyZero) { console.log('[VendorIssueModule] Skipping Firestore write for', iss.materialPurchasePoNo, '— qty=0, backfill will handle it'); return; }
+              if (iss.id) await updateVendorIssue(userUid, iss.id, iss);
+              else await addVendorIssue(userUid, iss);
+            }));
           } catch (err) { console.error('[VendorIssueModule] Failed to persist imported issues to Firestore:', err); try { localStorage.setItem('vendorIssueData', JSON.stringify(deduped)); } catch {} }
         })();
       }
     }
-  }, [purchaseOrders, userUid, psirData]); // *** FIX: depend on psirData ***
+  }, [purchaseOrders, userUid, psirData, vendorDeptOrders]); // also depends on vendorDeptOrders for plannedQty
 
   useEffect(() => {
     if (issues.length === 0) return;
