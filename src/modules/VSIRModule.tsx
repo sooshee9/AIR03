@@ -996,6 +996,9 @@ const VSIRModule: React.FC = () => {
     console.log('[VSIR] Operation mode:', editIdx !== null ? 'UPDATE (editIdx=' + editIdx + ')' : 'ADD (new record)');
     setIsSubmitting(true);
 
+    // Mark as just saved to bypass merge on next subscription
+    justSavedRef.current = true;
+
     try {
       const finalItemInput = { ...itemInput };
       const hasInvoiceDcNo = finalItemInput.invoiceDcNo && String(finalItemInput.invoiceDcNo).trim();
@@ -1026,9 +1029,6 @@ const VSIRModule: React.FC = () => {
         console.log('[VSIR] Add successful');
         setSuccessMessage('Record added successfully!');
       }
-
-      // Mark as just saved to bypass merge on next subscription
-      justSavedRef.current = true;
 
       // Sync OK Qty to Vendor Dept (for both add and update operations)
       if (finalItemInput.okQty > 0 && finalItemInput.poNo && finalItemInput.itemCode) {
