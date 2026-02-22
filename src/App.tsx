@@ -105,10 +105,21 @@ function App() {
           <button onClick={() => setUser(null)} style={{ background: '#fff', color: '#1a237e', border: 'none', borderRadius: 4, padding: '6px 14px', fontWeight: 500, cursor: 'pointer' }}>Logout</button>
         </div>
       </header>
-      <main style={{ maxWidth: 900, margin: '32px auto', background: '#fff', borderRadius: 8, boxShadow: '0 2px 12px #0002', padding: 32, minHeight: 400 }}>
-        <ErrorBoundary>
-          {modulesWithUser[activeModule]}
-        </ErrorBoundary>
+      <main style={{ maxWidth: 1400, margin: '24px auto 120px', padding: '0 20px' }}>
+        <div style={{
+          background: '#fff',
+          borderRadius: 14,
+          border: '1px solid #E4E8F0',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.05), 0 4px 16px rgba(0,0,0,0.04)',
+          minHeight: 500,
+          maxHeight: 'calc(100vh - 64px - 80px - 48px)',
+          overflowY: 'auto',
+          padding: 32
+        }}>
+          <ErrorBoundary>
+            {modulesWithUser[activeModule]}
+          </ErrorBoundary>
+        </div>
       </main>
       <footer style={{
         position: 'fixed',
